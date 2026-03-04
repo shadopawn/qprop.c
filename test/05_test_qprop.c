@@ -15,16 +15,16 @@
 int main() {
     //load NACA-4412 polars
     const char* filenames1[10] = {
-        "./airfoil_polar_naca4412_Ncrit=6/NACA 4412_T1_Re0.030_M0.00_N6.0.txt",
-        "./airfoil_polar_naca4412_Ncrit=6/NACA 4412_T1_Re0.040_M0.00_N6.0.txt",
-        "./airfoil_polar_naca4412_Ncrit=6/NACA 4412_T1_Re0.060_M0.00_N6.0.txt",
-        "./airfoil_polar_naca4412_Ncrit=6/NACA 4412_T1_Re0.080_M0.00_N6.0.txt",
-        "./airfoil_polar_naca4412_Ncrit=6/NACA 4412_T1_Re0.100_M0.00_N6.0.txt",
-        "./airfoil_polar_naca4412_Ncrit=6/NACA 4412_T1_Re0.130_M0.00_N6.0.txt",
-        "./airfoil_polar_naca4412_Ncrit=6/NACA 4412_T1_Re0.160_M0.00_N6.0.txt",
-        "./airfoil_polar_naca4412_Ncrit=6/NACA 4412_T1_Re0.200_M0.00_N6.0.txt",
-        "./airfoil_polar_naca4412_Ncrit=6/NACA 4412_T1_Re0.300_M0.00_N6.0.txt",
-        "./airfoil_polar_naca4412_Ncrit=6/NACA 4412_T1_Re0.500_M0.00_N6.0.txt"
+        "../webgui/airfoil_polars/naca4412_Ncrit=6/NACA 4412_T1_Re0.030_M0.00_N6.0.txt",
+        "../webgui/airfoil_polars/naca4412_Ncrit=6/NACA 4412_T1_Re0.040_M0.00_N6.0.txt",
+        "../webgui/airfoil_polars/naca4412_Ncrit=6/NACA 4412_T1_Re0.060_M0.00_N6.0.txt",
+        "../webgui/airfoil_polars/naca4412_Ncrit=6/NACA 4412_T1_Re0.080_M0.00_N6.0.txt",
+        "../webgui/airfoil_polars/naca4412_Ncrit=6/NACA 4412_T1_Re0.100_M0.00_N6.0.txt",
+        "../webgui/airfoil_polars/naca4412_Ncrit=6/NACA 4412_T1_Re0.130_M0.00_N6.0.txt",
+        "../webgui/airfoil_polars/naca4412_Ncrit=6/NACA 4412_T1_Re0.160_M0.00_N6.0.txt",
+        "../webgui/airfoil_polars/naca4412_Ncrit=6/NACA 4412_T1_Re0.200_M0.00_N6.0.txt",
+        "../webgui/airfoil_polars/naca4412_Ncrit=6/NACA 4412_T1_Re0.300_M0.00_N6.0.txt",
+        "../webgui/airfoil_polars/naca4412_Ncrit=6/NACA 4412_T1_Re0.500_M0.00_N6.0.txt"
     };
     Airfoil* naca4412 = import_xfoil_polars(filenames1, 10);
 
