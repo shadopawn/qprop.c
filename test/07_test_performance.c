@@ -25,15 +25,16 @@ int main() {
     Airfoil* naca2411 = import_xfoil_polars(filenames1, 5);
 
     //load propeller geometry from uiuc geometry file
-    Rotor* hqprop_5137 = import_rotor_geometry_uiuc("../validation/hqprop_5.1x3.7x3/hqprop_5.1x3.7x3_geom.txt", naca2411, 0.0648*2, 3);
-    double Omega = 38000*M_PI/30;
+    Rotor* hqprop_5137 = import_rotor_geometry_uiuc("../validation/hqprop_5.1x3.7x3/hqprop_5.1x3.7x3_geom.txt", naca2411, 0.12954, 3);
+    double rpm = 38000;
+    double Omega = rpm*M_PI/30;
     double tol = 1e-6;
     int itmax = 100;
     double rho = 1.225;
     double mu = 1.81e-5;
     double a = 0.0;
 
-    double Uinf = 53;
+    double Uinf = 30;
 
     clock_t start, end;
     int iterations = 1000;
@@ -50,6 +51,7 @@ int main() {
     
     printf("TEST 7.1:\n");
     printf("    Uinf: %f\n", Uinf);
+    printf("    RPM: %f\n", rpm);
     printf("    Thrust: %f\n", perf1->T);
     printf("    Torque: %f\n", perf1->Q);
 
