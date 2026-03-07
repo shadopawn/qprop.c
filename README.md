@@ -2,12 +2,12 @@
 
 <!--![qprop.c](docs/logo.svg)-->
 <p align="center">
-    <img src="docs/logo.svg"></img>
+    <a href="https://github.com/pavanandrea/qprop.c"><img src="docs/logo.svg"></img></a>
 </p>
 
 [🌐 Run in your browser](https://pavanandrea.github.io/qprop.c/webgui/index.html) &nbsp; &bullet; &nbsp;
 [⇩ Download](https://github.com/pavanandrea/qprop.c/releases/latest) &nbsp; &bullet; &nbsp;
-[✅ Validation](https://github.com/pavanandrea/qprop.c/tree/main/validation)
+[✅ Validation cases](https://github.com/pavanandrea/qprop.c/tree/main/validation)
 
 *qprop.c* is a simple, lightweight library for analyzing the aerodynamic
 performance of propellers.
@@ -61,13 +61,25 @@ with no dependencies, making it easy to include in other projects.
 🚀 Getting Started
 ------------------
 
-Download the latest release from the GitHub [releases page](https://github.com/pavanandrea/qprop.c/releases/latest).
-The package is self‑contained - no extra installation steps are required.
-After unpacking, you will find a set of example scripts to help you get started.
+To begin using qprop.c, you have two options depending on your needs:
+
+#### 🌐 Web Interface (Quick Analysis)
+
+For a fast, no-setup analysis, use the interactive web GUI:  
+[**Try it in your browser**](https://pavanandrea.github.io/qprop.c/webgui/index.html)
+
+This is ideal for quick evaluations without installing any software.
+
+#### 💾 Local Integration (For Development & Workflows)
+
+To integrate *qprop.c* into your projects, download the latest release from the
+[GitHub Releases page](https://github.com/pavanandrea/qprop.c/releases/latest).
+The package is completely self-contained and requires no external dependencies.
+
+After unpacking, you will find a set of example scripts to help you get started:
 
 ```
 📚 qprop-portable-latest.zip/
-├── 📄 LICENSE
 ├── 📂 qprop-portable/
 │   ├── 📄 LICENSE
 │   ├── 📄 qprop.h
@@ -75,10 +87,11 @@ After unpacking, you will find a set of example scripts to help you get started.
 │   ├── 📄 qprop.py
 │   ├── ⚙️ qprop-lib-linux-x64.so
 │   ├── ⚙️ qprop-lib-macos-arm64.dylib
-│   ├── ⚙️ qprop-lib-windows-x64.dll
+│   └── ⚙️ qprop-lib-windows-x64.dll
 ├── 📄 example_julia.jl
 ├── 📄 example_matlab.m
 ├── 📄 example_python.py
+├── 📄 LICENSE
 └── 📄 README.txt
 ```
 
@@ -151,6 +164,7 @@ If you encounter any issues while using *qprop.c*, please open an issue ticket a
 provide detailed information about the problem you are experiencing.
 
 Any question, feedback or request you may have are also welcome.
+Contact info: [here](https://pavanandrea.github.io/#contact).
 
 
 📑 References

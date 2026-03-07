@@ -53,10 +53,8 @@ void run_analysis(double Omega, double Uinf, double rho, double mu, int Npanels)
     
     //run qprop
     EM_ASM({
-        document.getElementById("results").innerHTML = `
-            <p>Status: ` + Module.UTF8ToString($0) + `</p>
-        `;
-    }, "running...");
+        document.getElementById("status-message").innerText = Module.UTF8ToString($0);
+    }, "Analysis running...");
     double tol = 1e-6;
     RotorPerformance* perf = qprop(rotor_refined, Uinf, Omega, tol, 100, rho, mu, 340.0);
     
@@ -64,10 +62,8 @@ void run_analysis(double Omega, double Uinf, double rho, double mu, int Npanels)
     for (int i=0; i<perf->nelems; ++i) {
         if (perf->residuals[i] > tol) {
             EM_ASM({
-                document.getElementById("results").innerHTML = `
-                    <p>Status: ` + Module.UTF8ToString($0) + `</p>
-                `;
-            }, "unable to converge, please rerun the analysis");
+                document.getElementById("status-message").innerText = Module.UTF8ToString($0);
+            }, "Analysis could not converge. Please try again or adjust parameters.");
             free_rotor_performance(perf);
             free_rotor(rotor_refined);
             return;
@@ -76,14 +72,14 @@ void run_analysis(double Omega, double Uinf, double rho, double mu, int Npanels)
 
     //update values in results-container
     EM_ASM({
+        document.getElementById("status-message").innerText = Module.UTF8ToString($0);
         document.getElementById("results").innerHTML = `
-            <p>Status: ` + Module.UTF8ToString($0) + `</p>
-            <p>Thrust: ` + $1.toFixed(4) + ` N (CT = ` + $2.toFixed(6) + `)</p>
-            <p>Torque: ` + $3.toFixed(6) + ` N-m</p>
-            <p>Power: ` + $4.toFixed(2) + ` W (CP = ` + $5.toFixed(6) + `)</p>
-            <p>Advance Ratio J: ` + $6.toFixed(4) + `</p>
+            <p tabindex="0">Thrust: ` + $1.toFixed(4) + ` N (CT = ` + $2.toFixed(6) + `)</p>
+            <p tabindex="0">Torque: ` + $3.toFixed(6) + ` N-m</p>
+            <p tabindex="0">Power: ` + $4.toFixed(2) + ` W (CP = ` + $5.toFixed(6) + `)</p>
+            <p tabindex="0">Advance Ratio J: ` + $6.toFixed(4) + `</p>
         `;
-    }, "converged", perf->T, perf->CT, perf->Q, perf->Q*Omega, perf->CP, perf->J);
+    }, "Analysis complete. qprop converged successfully. View results below", perf->T, perf->CT, perf->Q, perf->Q*Omega, perf->CP, perf->J);
     free_rotor(rotor_refined);
     free_rotor_performance(perf);
     free_rotor(rotor_geometry);

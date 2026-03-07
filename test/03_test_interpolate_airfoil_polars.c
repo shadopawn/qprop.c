@@ -30,69 +30,64 @@ int main() {
     printf("Size = %i\n", airfoil1->polars[1]->size);*/
 
     //test #1: interpolate on the 100k polar
-    PolarPoint* polarpoint1 = interpolate_polar(airfoil1->polars[1], deg2rad(4.25));
-    if (fabs(polarpoint1->CL - 0.9074) <= 1e-6 && fabs(polarpoint1->CD - 0.017235) <= 1e-6) {
+    PolarPoint polarpoint1;
+    interpolate_polar(&polarpoint1, airfoil1->polars[1], deg2rad(4.25));
+    if (fabs(polarpoint1.CL - 0.9074) <= 1e-6 && fabs(polarpoint1.CD - 0.017235) <= 1e-6) {
         printf("TEST 3.1 - PASSED :)\n");
     }
     else {
         printf("TEST 3.1 - FAILED :(\n");
         free_airfoil(airfoil1);
-        free(polarpoint1);
         return 0;
     }
-    free(polarpoint1);
 
     //test #2: retrieve alphamin point on the 30k polar
-    PolarPoint* polarpoint2 = interpolate_polar(airfoil1->polars[0], deg2rad(-15.0));
-    if (fabs(polarpoint2->CL + 0.4209) <= 1e-6 && fabs(polarpoint2->CD - 0.18542) <= 1e-6) {
+    PolarPoint polarpoint2;
+    interpolate_polar(&polarpoint2, airfoil1->polars[0], deg2rad(-15.0));
+    if (fabs(polarpoint2.CL + 0.4209) <= 1e-6 && fabs(polarpoint2.CD - 0.18542) <= 1e-6) {
         printf("TEST 3.2 - PASSED :)\n");
     }
     else {
         printf("TEST 3.2 - FAILED :(\n");
         free_airfoil(airfoil1);
-        free(polarpoint2);
         return 0;
     }
-    free(polarpoint2);
 
     //test #3: interpolate above CLmax
-    PolarPoint* polarpoint3 = interpolate_polar(airfoil1->polars[3], deg2rad(+90.0));
-    if (fabs(polarpoint3->CL - 1.5299) <= 1e-6 && fabs(polarpoint3->CD - 2.0) <= 1e-6) {
+    PolarPoint polarpoint3;
+    interpolate_polar(&polarpoint3, airfoil1->polars[3], deg2rad(+90.0));
+    if (fabs(polarpoint3.CL - 1.5299) <= 1e-6 && fabs(polarpoint3.CD - 2.0) <= 1e-6) {
         printf("TEST 3.3 - PASSED :)\n");
     }
     else {
         printf("TEST 3.3 - FAILED :(\n");
         free_airfoil(airfoil1);
-        free(polarpoint3);
         return 0;
     }
-    free(polarpoint3);
 
     //test #4: interpolate in between polars
-    PolarPoint* polarpoint4 = interpolate_airfoil_polars(airfoil1, deg2rad(+4.5), 150000, 0.0);
-    if (fabs(polarpoint4->CL - 0.93785) <= 1e-6 && fabs(polarpoint4->CD - 0.015125) <= 1e-6) {
+    PolarPoint polarpoint4;
+    interpolate_airfoil_polars(&polarpoint4, airfoil1, deg2rad(+4.5), 150000, 0.0);
+    if (fabs(polarpoint4.CL - 0.93785) <= 1e-6 && fabs(polarpoint4.CD - 0.015125) <= 1e-6) {
         printf("TEST 3.4 - PASSED :)\n");
     }
     else {
         printf("TEST 3.4 - FAILED :(\n");
         free_airfoil(airfoil1);
-        free(polarpoint4);
         return 0;
     }
-    free(polarpoint4);
 
     //test #5: interpolate above highest polar
-    PolarPoint* polarpoint5 = interpolate_airfoil_polars(airfoil1, deg2rad(+15.0), 1000000, 0.0);
-    if (fabs(polarpoint5->CL - 1.5299) <= 1e-6 && fabs(polarpoint5->CD - 0.05227) <= 1e-6) {
+    PolarPoint polarpoint5;
+    interpolate_airfoil_polars(&polarpoint5, airfoil1, deg2rad(+15.0), 1000000, 0.0);
+    if (fabs(polarpoint5.CL - 1.5299) <= 1e-6 && fabs(polarpoint5.CD - 0.05227) <= 1e-6) {
         printf("TEST 3.5 - PASSED :)\n");
     }
     else {
         printf("TEST 3.5 - FAILED :(\n");
         free_airfoil(airfoil1);
-        free(polarpoint5);
         return 0;
     }
-    free(polarpoint5);
 
     free_airfoil(airfoil1);
     return 0;

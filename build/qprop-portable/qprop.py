@@ -3,7 +3,7 @@
 #
 #   How to import:
 #   import sys
-#   sys.path.insert(0, "path/to/bin/qprop/")
+#   sys.path.insert(0, "path/to/qprop-portable/")
 #   import qprop
 #
 #   Author: Andrea Pavan
