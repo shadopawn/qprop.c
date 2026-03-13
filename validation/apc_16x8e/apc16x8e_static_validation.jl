@@ -26,7 +26,7 @@
 #-------------------------------------------------------------------------------
 using DelimitedFiles;
 using Plots;
-include("qprop/qprop.jl");
+include("qprop-portable/qprop.jl");
 import .QProp;
 
 function main()

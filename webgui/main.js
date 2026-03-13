@@ -20,13 +20,13 @@ document.addEventListener("click", function(event) {
         var newRow = document.createElement("tr");
         newRow.innerHTML = `
             <td></td>
-            <td><input type="text" value="0.0"></td>
-            <td><input type="text" value="0.0"></td>
-            <td><input type="text" value="0.0"></td>
+            <td><input type="text" value="0.0" aria-label="radius millimeters"></td>
+            <td><input type="text" value="0.0" aria-label="chord millimeters"></td>
+            <td><input type="text" value="0.0" aria-label="twist degrees"></td>
             <td>
                 <div class="add-remove-buttons">
-                    <button type="button" class="add-row">+</button>
-                    <button type="button" class="remove-row">-</button>
+                    <button type="button" class="add-row" aria-label="Add row below">+</button>
+                    <button type="button" class="remove-row" aria-label="Remove row">-</button>
                 </div>
             </td>
         `;
@@ -70,5 +70,6 @@ document.getElementById("run-button").addEventListener("click", function() {
     //show results
     document.getElementById("results-container").style.display = "block";
     document.getElementById("results-container").scrollIntoView({ behavior: "smooth"});
+    document.getElementById("status-message").focus();
 });
 

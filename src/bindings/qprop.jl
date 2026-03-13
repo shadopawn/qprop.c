@@ -2,7 +2,7 @@
 #   A Julia wrapper for qprop.c
 #
 #   How to import:
-#   include("path/to/qprop/qprop.jl");
+#   include("path/to/qprop-portable/qprop.jl");
 #   import .QProp;
 #
 #   Author: Andrea Pavan
@@ -39,9 +39,9 @@ if !isfile(lib_filename)
 end
 
 
-#----------------------
-#   DATA STRUCTURES
-#----------------------
+#-------------------------------
+#   INTERNAL DATA STRUCTURES
+#-------------------------------
 
 
 #data structure for polars

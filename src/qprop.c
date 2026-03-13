@@ -30,8 +30,8 @@
 #include <string.h>
 #include "qprop.h"
 
-#define PI 3.14159265358979323846
-#define MAX_LINE_LENGTH 256     //maximum length of a line in a xfoil polar file
+#define PI 3.14159265358979323846   //avoid potential issues with M_PI
+#define MAX_LINE_LENGTH 256         //maximum length of a line in a xfoil polar file
 
 
 //converts degrees to radians
@@ -283,7 +283,7 @@ Airfoil* analytic_polar_curves(double CL0, double CL_a, double CLmin, double CLm
 //linear interpolation between two points (x1,y1)-(x2,y2)
 //INTERNAL USE ONLY
 double interp1(double x1, double y1, double x2, double y2, double xq) {
-    if (x2 == x1) {
+    if (fabs(x2 - x1) < 1e-15) {
         return y1;
     }
     return y1 + (xq-x1)*(y2-y1)/(x2-x1);
@@ -299,21 +299,16 @@ typedef struct {
 
 //interpolate airfoil coefficient across a polar
 //INTERNAL USE ONLY
-PolarPoint* interpolate_polar(Polar* currentpolar, double alpha) {
-    PolarPoint* query = calloc(1, sizeof(PolarPoint));
-    if (!query) {
-        printf("ERROR: memory allocation error in interpolate_polar()\n");
-        return NULL;
-    }
-    query->alpha = alpha;
-    query->CL = 0.0;
-    query->CD = 0.0;
+void interpolate_polar(PolarPoint* out, Polar* currentpolar, double alpha) {
+    out->alpha = alpha;
+    out->CL = 0.0;
+    out->CD = 0.0;
 
     if (alpha <= currentpolar->alpha[0]) {
         //below minimum AoA
         //interpolate to retrieve CD=2.0 at alpha=-90°
-        query->CL = currentpolar->CL[0];
-        query->CD = interp1(
+        out->CL = currentpolar->CL[0];
+        out->CD = interp1(
             -PI/2,
             2.0,
             currentpolar->alpha[0],
@@ -321,15 +316,15 @@ PolarPoint* interpolate_polar(Polar* currentpolar, double alpha) {
             alpha
         );
         //ALTERNATIVE: constant cap on the left
-        //query->CL = currentpolar->CL[0];
-        //query->CD = currentpolar->CD[0];
-        return query;
+        //out->CL = currentpolar->CL[0];
+        //out->CD = currentpolar->CD[0];
+        return;
     }
     else if (alpha > currentpolar->alpha[currentpolar->size-1]) {
         //above maximum AoA
         //interpolate to retrieve CD=2.0 at alpha=+90°
-        query->CL = currentpolar->CL[currentpolar->size-1];
-        query->CD = interp1(
+        out->CL = currentpolar->CL[currentpolar->size-1];
+        out->CD = interp1(
             currentpolar->alpha[currentpolar->size-1],
             currentpolar->CD[currentpolar->size-1],
             PI/2,
@@ -337,22 +332,22 @@ PolarPoint* interpolate_polar(Polar* currentpolar, double alpha) {
             alpha
         );
         //ALTERNATIVE: constant cap on the right
-        //query->CL = currentpolar->CL[currentpolar->size-1];
-        //query->CD = currentpolar->CD[currentpolar->size-1];
-        return query;
+        //out->CL = currentpolar->CL[currentpolar->size-1];
+        //out->CD = currentpolar->CD[currentpolar->size-1];
+        return;
     }
     
     //interpolate between two alpha
     for (int i=1; i<(currentpolar->size); ++i) {
         if (currentpolar->alpha[i-1] < alpha && alpha <= currentpolar->alpha[i]) {
-            query->CL = interp1(
+            out->CL = interp1(
                 currentpolar->alpha[i-1],       //x1
                 currentpolar->CL[i-1],          //y1
                 currentpolar->alpha[i],         //x2
                 currentpolar->CL[i],            //y2
                 alpha                           //xq
             );
-            query->CD = interp1(
+            out->CD = interp1(
                 currentpolar->alpha[i-1],       //x1
                 currentpolar->CD[i-1],          //y1
                 currentpolar->alpha[i],         //x2
@@ -362,21 +357,16 @@ PolarPoint* interpolate_polar(Polar* currentpolar, double alpha) {
             break;
         }
     }
-    return query;
+    return;
 }
 
 //interpolate airfoil polars
 //INTERNAL USE ONLY
-PolarPoint* interpolate_airfoil_polars(Airfoil* currentairfoil, double alpha, double Re, double Mach) {
+void interpolate_airfoil_polars(PolarPoint* out, Airfoil* currentairfoil, double alpha, double Re, double Mach) {
     //find the two polars that bracket the query point
-    PolarPoint* query = calloc(1, sizeof(PolarPoint));
-    if (!query) {
-        printf("ERROR: memory allocation error in interpolate_airfoil_polars()\n");
-        return NULL;
-    }
-    query->alpha = alpha;
-    query->CL = 0.0;
-    query->CD = 0.0;
+    out->alpha = alpha;
+    out->CL = 0.0;
+    out->CD = 0.0;
 
     int lower_polar_idx = 0;
     int upper_polar_idx = currentairfoil->size - 1;
@@ -400,36 +390,36 @@ PolarPoint* interpolate_airfoil_polars(Airfoil* currentairfoil, double alpha, do
     }
 
     //interpolate across alpha at the lower and upper polars
-    PolarPoint* lower = interpolate_polar(currentairfoil->polars[lower_polar_idx], alpha);
-    PolarPoint* upper = interpolate_polar(currentairfoil->polars[upper_polar_idx], alpha);
+    PolarPoint lower = {0.0, 0.0, 0.0};
+    interpolate_polar(&lower, currentairfoil->polars[lower_polar_idx], alpha);
+    PolarPoint upper = {0.0, 0.0, 0.0};
+    interpolate_polar(&upper, currentairfoil->polars[upper_polar_idx], alpha);
 
     //interpolate across Re
-    query->CL = interp1(
+    out->CL = interp1(
         currentairfoil->polars[lower_polar_idx]->Re,    //x1
-        lower->CL,                                      //y1
+        lower.CL,                                       //y1
         currentairfoil->polars[upper_polar_idx]->Re,    //x2
-        upper->CL,                                      //y2
+        upper.CL,                                       //y2
         Re                                              //xq
     );
-    query->CD = interp1(
+    out->CD = interp1(
         currentairfoil->polars[lower_polar_idx]->Re,    //x1
-        lower->CD,                                      //y1
+        lower.CD,                                       //y1
         currentairfoil->polars[upper_polar_idx]->Re,    //x2
-        upper->CD,                                      //y2
+        upper.CD,                                       //y2
         Re                                              //xq
     );
-    free(lower);
-    free(upper);
 
     //optional: correct for Mach number using the Prantdl-Meyer compressibility factor
     //set Mach = 0 to disable correction
     if (Mach > 0.01 && Mach < 0.99){
-        query->CL = query->CL / sqrt(1.0 - Mach*Mach);
+        out->CL = out->CL / sqrt(1.0 - Mach*Mach);
         //do not apply correction when Mach number exceeds 1
         //no warning will be issued, as this call may be part of an inner iteration
         //it is the user's responsibility to perform a sanity check on the final result
     }
-    return query;
+    return;
 }
 
 //append a new section at the end of the rotor
@@ -797,7 +787,8 @@ void residual(ResidualOutput* output, double psi, ResidualArgs* args) {
 
     //interpolate airfoil aerodynamic coefficients
     double Mach = (a > 0)? sqrt(output->W/a) : 0.0;
-    PolarPoint* operatingpoint = interpolate_airfoil_polars(currentelement->airfoil, alpha, Re, Mach);
+    PolarPoint operatingpoint = {0.0, 0.0, 0.0};
+    interpolate_airfoil_polars(&operatingpoint, currentelement->airfoil, alpha, Re, Mach);
 
     //calculate tip losses
     output->lambdaw = ((currentelement->r)/R)*(Wa/Wt);
@@ -810,13 +801,12 @@ void residual(ResidualOutput* output, double psi, ResidualArgs* args) {
 
     //determine circulation and rotor coefficients
     output->Gamma = output->vt * (4.0*PI*(currentelement->r) / B) * F * sqrt(1.0 + pow(4*output->lambdaw*R/(PI*B*(currentelement->r)), 2));
-    output->residual = output->Gamma - 0.5 * output->W * (currentelement->c) * operatingpoint->CL;
-    output->Cn = operatingpoint->CL* Wt / output->W - operatingpoint->CD * Wa / output->W;
-    output->Ct = operatingpoint->CL* Wa / output->W + operatingpoint->CD * Wt / output->W;
-    free(operatingpoint);
+    output->residual = output->Gamma - 0.5 * output->W * (currentelement->c) * operatingpoint.CL;
+    output->Cn = operatingpoint.CL* Wt / output->W - operatingpoint.CD * Wa / output->W;
+    output->Ct = operatingpoint.CL* Wa / output->W + operatingpoint.CD * Wt / output->W;
 }
 
-//wrap the residual function so it can be passed to fzero
+//wrap residual function so it can be passed to bisection/brent
 //INTERNAL USE ONLY
 double residual_wrapper(double psi, void* args) {
     ResidualOutput output;      //= {0.0, 0.0, 0.0, 0, NULL, 0.0, 0.0, 0.0}
@@ -826,24 +816,22 @@ double residual_wrapper(double psi, void* args) {
 
 //find the root of a function f(x)=0 using the bisection method
 //INTERNAL USE ONLY
-double fzero(double (*f)(double x, void* args), double a, double b, double tol, int itmax, void* args) {
+double bisection(double (*f)(double x, void* args), double a, double b, double tol, int itmax, void* args) {
     double fa = f(a, args);
     double fb = f(b, args);
     if (fa*fb > 0) {
-        printf("ERROR when using fzero: f(a) and f(b) must have opposite signs\n");
+        printf("ERROR while using bisection: f(a) and f(b) must have opposite signs\n");
         return a;
     }
 
-    //iterate
     double c = 0.0;
     double fc = 0.0;
     for (int i=0; i<itmax; ++i) {
         //evaluate mid point
         c = 0.5*(a+b);
         fc = f(c, args);
-        //printf("c=%f - fc=%f\n", c, fc);
         //if (fabs(fc) <= tol) {                    //stopping criterion on residual only
-        if (fabs(fc) <= tol && 0.5*(b-a) <= tol) {  //stopping criterion on residual and convergence
+        if (fabs(fc) <= tol && b-a <= tol) {        //stopping criterion on residual and convergence
             return c;
         }
 
@@ -858,8 +846,96 @@ double fzero(double (*f)(double x, void* args), double a, double b, double tol, 
         }
     }
 
-    printf("ERROR while using fzero: maximum number of iterations reached\n");
+    printf("ERROR while using bisection: maximum number of iterations reached\n");
     return c;
+}
+
+//find the root of a function f(x)=0 using the Brent's method
+//this should be more efficient than bisection, requiring less iterations
+//INTERNAL USE ONLY
+double brent(double (*f)(double x, void* args), double a, double b, double tol, int itmax, void* args) {
+    double fa = f(a, args);
+    double fb = f(b, args);
+    if (fa*fb > 0) {
+        printf("ERROR while using brent: f(a) and f(b) must have opposite signs\n");
+        return a;
+    }
+
+    //b must be a better approximation than a
+    if (fabs(fa) < fabs(fb)) {
+        //swap a and b
+        double tmp = a;
+        a = b;
+        b = tmp;
+        tmp = fa;
+        fa = fb;
+        fb = tmp;
+    }
+
+    double c = a;
+    double fc = fa;
+    double s = 0.0;
+    double d = 0.0;
+    bool mflag = true;
+    for (int i=0; i<itmax; ++i) {
+        if (fabs(fa-fc) > 0.9*tol && fabs(fb-fc) > 0.9*tol) {
+            //use quadratic lagrange polynomial interpolation
+            s = a*fb*fc/((fa-fb)*(fa-fc)) + b*fa*fc/((fb-fa)*(fb-fc)) + c*fa*fb/((fc-fa)*(fc-fb));
+        }
+        else {
+            //use secant method
+            s = b - fb * (b-a)/(fb-fa);
+        }
+
+        double smin = (0.75*a+0.25*b < b) ? 0.75*a+0.25*b : b;
+        double smax = (0.75*a+0.25*b > b) ? 0.75*a+0.25*b : b;
+        if ((s < smin || s > smax) ||
+                (mflag && fabs(s-b) >= 0.5*(b-c)) ||
+                (!mflag && fabs(s-b) >= 0.5*(c-d)) ||
+                (mflag && fabs(b-c) < tol) ||
+                (!mflag && fabs(c-d) < tol)) {
+            //fallback to bisection method
+            s = 0.5*(a+b);
+            mflag = true;
+        }
+        else {
+            mflag = false;
+        }
+
+        //shrink interval
+        double fs = f(s, args);
+        d = c;
+        c = b;
+        fc = fb;
+        if (fa*fs < 0) {
+            b = s;
+            fb = fs;
+        }
+        else {
+            a = s;
+            fa = fs;
+        }
+
+        //ensure that b is still a better approximation than a
+        if (fabs(fa) < fabs(fb)) {
+            //swap a and b
+            double tmp = a;
+            a = b;
+            b = tmp;
+            tmp = fa;
+            fa = fb;
+            fb = tmp;
+        }
+
+        //check convergence
+        //if (fabs(fb) <= tol) {                    //stopping criterion on residual only
+        if (fabs(fb) <= tol && b-a <= tol) {        //stopping criterion on residual and convergence
+            return b;
+        }
+    }
+
+    printf("ERROR while using brent: maximum number of iterations reached\n");
+    return b;
 }
 
 //run qprop iterations
@@ -910,13 +986,14 @@ RotorPerformance* qprop(Rotor* rotor, double Uinf, double Omega, double tol, int
         
         //find the value of psi that makes the residual function equal to zero
         ResidualArgs args = {Uinf, Omega*currentelement.r, rotor->D/2, rotor->B, &currentelement, rho, mu, a};
-        double psi = fzero(residual_wrapper, -PI/2, +PI/2, tol, itmax, &args);
+        double psi = brent(residual_wrapper, -PI/2, +PI/2, tol, itmax, &args);
+        //double psi = bisection(residual_wrapper, -PI/2, +PI/2, tol, itmax, &args);
 
         //calculate element thrust and torque
         ResidualOutput res;     //= {0.0, 0.0, 0.0, 0, NULL, 0.0, 0.0, 0.0}
         residual(&res, psi, &args);
         if (fabs(res.residual) > tol) {
-            printf("ERROR when using qprop at blade location #%i: unable to find psi value that is zeroing the residual function (residual=%e exceeds tolerance=%e)\n", i, perf->residuals[i], tol);
+            printf("ERROR while using qprop at blade location #%i: unable to find psi value that is zeroing the residual function (residual=%e exceeds tolerance=%e)\n", i, perf->residuals[i], tol);
             free_rotor_performance(perf);
             return NULL;
         }
