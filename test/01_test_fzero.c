@@ -20,14 +20,22 @@ double f1(double x, void* args) {
 }
 
 int main() {
-    //test #1: find root of f1 in [-1,0]
-    double x1 = fzero(f1, -1.0, 0.0, 1e-6, 100, NULL);
-    if (fabs(x1 + 0.5812517) < 1e-5) {
+    //test #1: find root of f1 in [-1,0] using the bisection method
+    double x1 = bisection(f1, -1.0, 0.0, 1e-6, 100, NULL);
+    if (fabs(x1 + 0.5812517) <= 1e-6) {
         printf("TEST 1.1 - PASSED :)\n");
     }
     else {
         printf("TEST 1.1 - FAILED :(\n");
     }
     
+    //test #2: find root of f1 in [-1,0] using the Brent's method
+    double x2 = brent(f1, -1.0, 0.0, 1e-6, 100, NULL);
+    if (fabs(x2 + 0.5812517) <= 1e-6) {
+        printf("TEST 1.2 - PASSED :)\n");
+    }
+    else {
+        printf("TEST 1.2 - FAILED :(\n");
+    }
     return 0;
 }

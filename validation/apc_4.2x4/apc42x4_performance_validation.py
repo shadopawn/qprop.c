@@ -28,7 +28,7 @@
 import matplotlib.pyplot as plt;
 import os;
 import sys;
-sys.path.insert(0, "./qprop/");
+sys.path.insert(0, "./qprop-portable/");
 import qprop;
 
 def main():

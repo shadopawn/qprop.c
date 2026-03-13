@@ -17,7 +17,7 @@ import math;
 import matplotlib.pyplot as plt;
 import os;
 import sys;
-sys.path.insert(0, "./qprop/");
+sys.path.insert(0, "./qprop-portable/");
 import qprop;
 
 def main():
@@ -41,31 +41,49 @@ def main():
     #original_output[i][3]: sweep angle of each element (deg)
 
     #create propeller geometry
-    r = [row[0] for row in original_output]
-    c = [row[1] for row in original_output]
-    nelems = len(r)                     #number of elements
-    dr = [0.0] * nelems                 #width of each element (m)
-    dr[0] = r[1] - r[0]
-    dr[1:-1] = [0.5 * (r[i+1] - r[i-1]) for i in range(1, nelems-1)]
-    dr[-1] = r[-1] - r[-2]
-    D = 2 * (r[-1] + 0.5 * dr[-1])      #propeller diameter (m) - should be 6inch=0.1524m
-    B = 2                               #number of blades
-    elements = []
-    for i in range(nelems):
-        newelement = qprop.create_element(
-            c[i],
-            qprop.deg2rad(original_output[i][2]),
-            r[i],
-            dr[i],
+    #NOTE that the output file radius is from the element center, not from the section
+    sections = []
+    dr_elem = original_output[1][0] - original_output[0][0]     #size of first element
+    r_elem = original_output[0][0]                              #location of first element center
+    r = r_elem - dr_elem/2                                      #location of root station
+    dc_elem = original_output[1][1] - original_output[0][1]     #chord variation in the first element
+    c_elem = original_output[0][1]
+    c = c_elem - dc_elem
+    dβ_elem = original_output[1][2] - original_output[0][2]     #twist variation in the first element
+    β_elem = original_output[0][2]
+    β = β_elem - dβ_elem
+    sections.append(qprop.create_section(
+        c,
+        qprop.deg2rad(β),
+        r,
+        airfoil_analytic
+    ))
+    for i in range(1, len(original_output)):
+        r_elem = original_output[i][0]
+        c_elem = original_output[i][1]
+        β_elem = original_output[i][2]
+        if i >= 1:
+            dr_elem = r_elem - original_output[i-1][0]
+            dc_elem = c_elem - original_output[i-1][1]
+            dβ_elem = β_elem - original_output[i-1][2]
+        r = r_elem + dr_elem/2
+        c = c_elem + dc_elem/2
+        β = β_elem + dβ_elem/2
+        sections.append(qprop.create_section(
+            c,
+            qprop.deg2rad(β),
+            r,
             airfoil_analytic
-        )
-        elements.append(newelement)
-    graupner6x3 = qprop.create_rotor(D, B, nelems, elements)
+        ))
+    D = 2 * sections[-1].r
+    B = 2
+    graupner6x3 = qprop.create_rotor(D, B, len(sections), sections)
 
     #run qprop.c
     Uinf = 5.0;                         #freestream velocity (m/s)
     Omega = 14020*math.pi/30;           #rotor speed (rad/s)
     qpropc_results = qprop.qprop(graupner6x3, Uinf, Omega, 1e-6, 200)
+    nelems = qpropc_results.nelems
     for i in range(nelems):
         if abs(qpropc_results.residuals[i]) > 1e-6:
             print("ERROR while running qprop: convergence not reached in one or more elements")
@@ -75,6 +93,12 @@ def main():
     print("  Torque: ", round(qpropc_results.Q, 5), " N-m")
 
     #compare with original QPROP results
+    r_original = [row[0] for row in original_output]
+    dr_original = [0.0] * len(r_original)
+    dr_original[0] = r_original[1] - r_original[0]
+    for i in range(1, len(r_original)-1):
+        dr_original[i] = 0.5 * (r_original[i+1] - r_original[i-1])
+    dr_original[-1] = r_original[-1] - r_original[-2]
     Wa_original = [row[9] for row in original_output]
     Wt_original = [Wa * row[0] / (row[11] * (D/2))                  for Wa, row in zip(Wa_original, original_output)]
     W_original = [math.sqrt(Wa**2 + Wt**2)                          for Wa, Wt in zip(Wa_original, Wt_original)]
@@ -85,6 +109,9 @@ def main():
     Ct_original = [Cl * math.sin(phi) + Cd * math.cos(phi)          for Cl, Cd, phi in zip(Cl_original, Cd_original, phi_original)]
     dTdr_original = [0.5 * 1.225 * W**2 * Cn * row[1]               for W, Cn, row in zip(W_original, Cn_original, original_output)]
     dQdr_original = [0.5 * 1.225 * W**2 * Ct * row[1] * row[0]      for W, Ct, row in zip(W_original, Ct_original, original_output)]
+    print("QPROP v1.22 results:")
+    print(f"  Thrust:{round(2 * sum(dTdr_original[i] * dr_original[i] for i in range(len(dr_original))), 5)}N")
+    print(f"  Torque:{round(2 * sum(dQdr_original[i] * dr_original[i] for i in range(len(dr_original))), 5)}N-m")
 
     #compare thrust distributions
     plt1 = plt.figure(figsize=(6,4), dpi=100)       #600x400px
@@ -95,8 +122,8 @@ def main():
         linewidth = 2
     )
     plt.scatter(
-        [r[i] / (D/2)                       for i in range(nelems)],
-        dTdr_original,
+        [r_original[i] / (D/2)              for i in range(nelems)],
+        [dTdr_original[i]                   for i in range(nelems)],
         label = "QPROP v1.22",
         marker = "D",
         s = 20,
@@ -119,8 +146,8 @@ def main():
         linewidth = 2
     )
     plt.scatter(
-        [r[i] / (D/2)                       for i in range(nelems)],
-        dQdr_original,
+        [r_original[i] / (D/2)              for i in range(nelems)],
+        [dQdr_original[i]                   for i in range(nelems)],
         label = "QPROP v1.22",
         marker = "D",
         s = 20,

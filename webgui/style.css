@@ -101,19 +101,21 @@ th {
     background-color: #c0392b;
 }
 
+.remove-row:disabled {
+    visibility: hidden;
+}
+
 
 /*** TITLE BAR ***/
 
-.title-bar {
+header {
     background-color: #202020;
-    color: #747C80;
     padding: 1rem;
-    text-align: center;
     position: relative;
     box-shadow: 0 0 10px #2020206e;
-}
 
-.title-bar h1 {
+    color: #747C80;
+    text-align: center;
     font-size: 1.5rem;
     margin: 0;
 }
@@ -121,14 +123,15 @@ th {
 
 /*** FOOTER ***/
 
-.footer-bar {
+footer {
     background-color: #202020;
     color: #747C80;
     padding: 1rem;
     text-align: center;
     box-shadow: 0 0 10px #2020206e;
 }
-.footer-bar p {
+
+footer p {
     margin: 0;
 }
 
