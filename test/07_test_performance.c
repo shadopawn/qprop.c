@@ -14,7 +14,7 @@
 #include "../src/qprop.c"
 
 int main() {
-    //load NACA-4412 polars
+    //load NACA-2411 polars
     const char* filenames1[5] = {
         "../webgui/airfoil_polars/naca2411_Ncrit=9/xf-naca2411-il-50000.txt",
         "../webgui/airfoil_polars/naca2411_Ncrit=9/xf-naca2411-il-100000.txt",
@@ -26,15 +26,15 @@ int main() {
 
     //load propeller geometry from uiuc geometry file
     Rotor* hqprop_5137 = import_rotor_geometry_uiuc("../validation/hqprop_5.1x3.7x3/hqprop_5.1x3.7x3_geom.txt", naca2411, 0.12954, 3);
-    double rpm = 38000;
+    double rpm = 35000;
     double Omega = rpm*M_PI/30;
     double tol = 1e-6;
     int itmax = 100;
     double rho = 1.225;
     double mu = 1.81e-5;
-    double a = 0.0;
+    double a = 340.0;
 
-    double Uinf = 30;
+    double Uinf = 42;
 
     clock_t start, end;
     int iterations = 1000;
