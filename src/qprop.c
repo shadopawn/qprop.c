@@ -297,6 +297,25 @@ typedef struct {
     double CD;
 } PolarPoint;
 
+//extrapolates CL and CD to a query AoA beyond a polar's data range, using the
+//Viterna-Corrigan flat-plate post-stall model anchored at the polar's edge point
+//(alpha_s, CL_s, CD_s), assuming CD=2.0 (flat plate normal to the flow) at AoA=+-90°
+//INTERNAL USE ONLY
+void extrapolate_polar_post_stall(double alpha_s, double CL_s, double CD_s, double alpha, double* CL, double* CD) {
+    const double CDmax = 2.0;
+    double sin_s = sin(alpha_s);
+    double cos_s = cos(alpha_s);
+    double B1 = CDmax;
+    double B2 = (CD_s - CDmax*sin_s*sin_s) / cos_s;
+    double A1 = B1/2.0;
+    double A2 = (CL_s - CDmax*sin_s*cos_s) * sin_s / (cos_s*cos_s);
+
+    double sin_a = sin(alpha);
+    double cos_a = cos(alpha);
+    *CL = A1*sin(2.0*alpha) + A2*cos_a*cos_a/sin_a;
+    *CD = B1*sin_a*sin_a + B2*cos_a;
+}
+
 //interpolate airfoil coefficient across a polar
 //INTERNAL USE ONLY
 void interpolate_polar(PolarPoint* out, Polar* currentpolar, double alpha) {
@@ -304,16 +323,21 @@ void interpolate_polar(PolarPoint* out, Polar* currentpolar, double alpha) {
     out->CL = 0.0;
     out->CD = 0.0;
 
+    //past this AoA, qprop tends to fail to converge, so the extrapolated
+    //coefficients are held constant beyond it rather than extrapolated further
+    const double ALPHA_EXTRAPOLATION_LIMIT = 89.0*PI/180.0;
+
     if (alpha <= currentpolar->alpha[0]) {
-        //below minimum AoA
-        //interpolate to retrieve CD=2.0 at alpha=-90°
-        out->CL = currentpolar->CL[0];
-        out->CD = interp1(
-            -PI/2,
-            2.0,
+        //below minimum AoA: extrapolate CL and CD with the Viterna-Corrigan
+        //flat-plate post-stall model, anchored at the lowest polar point
+        double alpha_eval = (alpha < -ALPHA_EXTRAPOLATION_LIMIT)? -ALPHA_EXTRAPOLATION_LIMIT : alpha;
+        extrapolate_polar_post_stall(
             currentpolar->alpha[0],
+            currentpolar->CL[0],
             currentpolar->CD[0],
-            alpha
+            alpha_eval,
+            &out->CL,
+            &out->CD
         );
         //ALTERNATIVE: constant cap on the left
         //out->CL = currentpolar->CL[0];
@@ -321,15 +345,16 @@ void interpolate_polar(PolarPoint* out, Polar* currentpolar, double alpha) {
         return;
     }
     else if (alpha > currentpolar->alpha[currentpolar->size-1]) {
-        //above maximum AoA
-        //interpolate to retrieve CD=2.0 at alpha=+90°
-        out->CL = currentpolar->CL[currentpolar->size-1];
-        out->CD = interp1(
+        //above maximum AoA: extrapolate CL and CD with the Viterna-Corrigan
+        //flat-plate post-stall model, anchored at the highest polar point
+        double alpha_eval = (alpha > ALPHA_EXTRAPOLATION_LIMIT)? ALPHA_EXTRAPOLATION_LIMIT : alpha;
+        extrapolate_polar_post_stall(
             currentpolar->alpha[currentpolar->size-1],
+            currentpolar->CL[currentpolar->size-1],
             currentpolar->CD[currentpolar->size-1],
-            PI/2,
-            2.0,
-            alpha
+            alpha_eval,
+            &out->CL,
+            &out->CD
         );
         //ALTERNATIVE: constant cap on the right
         //out->CL = currentpolar->CL[currentpolar->size-1];
