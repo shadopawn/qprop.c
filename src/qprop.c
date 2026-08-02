@@ -811,7 +811,7 @@ void residual(ResidualOutput* output, double psi, ResidualArgs* args) {
     double alpha = currentelement->beta - output->phi;
 
     //interpolate airfoil aerodynamic coefficients
-    double Mach = (a > 0)? sqrt(output->W/a) : 0.0;
+    double Mach = (a > 0) ? output->W/a : 0.0;
     PolarPoint operatingpoint = {0.0, 0.0, 0.0};
     interpolate_airfoil_polars(&operatingpoint, currentelement->airfoil, alpha, Re, Mach);
 
