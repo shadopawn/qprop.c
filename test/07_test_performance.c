@@ -14,18 +14,24 @@
 #include "../src/qprop.c"
 
 int main() {
-    //load NACA-2411 polars
-    const char* filenames1[5] = {
-        "../webgui/airfoil_polars/naca2411_Ncrit=9/xf-naca2411-il-50000.txt",
-        "../webgui/airfoil_polars/naca2411_Ncrit=9/xf-naca2411-il-100000.txt",
-        "../webgui/airfoil_polars/naca2411_Ncrit=9/xf-naca2411-il-200000.txt",
-        "../webgui/airfoil_polars/naca2411_Ncrit=9/xf-naca2411-il-500000.txt",
-        "../webgui/airfoil_polars/naca2411_Ncrit=9/xf-naca2411-il-1000000.txt",
+    const char* clark_y_filenames[12] = {
+        "../webgui/airfoil_polars/clark_y_Ncrit=7/CLARK Y AIRFOIL_T1_Re0.010_M0.00_N7.0.txt",
+        "../webgui/airfoil_polars/clark_y_Ncrit=7/CLARK Y AIRFOIL_T1_Re0.020_M0.00_N7.0.txt",
+        "../webgui/airfoil_polars/clark_y_Ncrit=7/CLARK Y AIRFOIL_T1_Re0.030_M0.00_N7.0.txt",
+        "../webgui/airfoil_polars/clark_y_Ncrit=7/CLARK Y AIRFOIL_T1_Re0.040_M0.00_N7.0.txt",
+        "../webgui/airfoil_polars/clark_y_Ncrit=7/CLARK Y AIRFOIL_T1_Re0.060_M0.00_N7.0.txt",
+        "../webgui/airfoil_polars/clark_y_Ncrit=7/CLARK Y AIRFOIL_T1_Re0.080_M0.00_N7.0.txt",
+        "../webgui/airfoil_polars/clark_y_Ncrit=7/CLARK Y AIRFOIL_T1_Re0.100_M0.00_N7.0.txt",
+        "../webgui/airfoil_polars/clark_y_Ncrit=7/CLARK Y AIRFOIL_T1_Re0.130_M0.00_N7.0.txt",
+        "../webgui/airfoil_polars/clark_y_Ncrit=7/CLARK Y AIRFOIL_T1_Re0.160_M0.00_N7.0.txt",
+        "../webgui/airfoil_polars/clark_y_Ncrit=7/CLARK Y AIRFOIL_T1_Re0.200_M0.00_N7.0.txt",
+        "../webgui/airfoil_polars/clark_y_Ncrit=7/CLARK Y AIRFOIL_T1_Re0.300_M0.00_N7.0.txt",
+        "../webgui/airfoil_polars/clark_y_Ncrit=7/CLARK Y AIRFOIL_T1_Re0.500_M0.00_N7.0.txt",
     };
-    Airfoil* naca2411 = import_xfoil_polars(filenames1, 5);
+    Airfoil* clark_y = import_xfoil_polars(clark_y_filenames, 12);
 
     //load propeller geometry from uiuc geometry file
-    Rotor* hqprop_5137 = import_rotor_geometry_uiuc("../validation/hqprop_5.1x3.7x3/hqprop_5.1x3.7x3_geom.txt", naca2411, 0.12954, 3);
+    Rotor* hqprop_5137 = import_rotor_geometry_uiuc("../validation/hqprop_5.1x3.7x3/hqprop_5.1x3.7x3_geom.txt", clark_y, 0.12954, 3);
     double rpm = 35000;
     double Omega = rpm*M_PI/30;
     double tol = 1e-6;
@@ -58,7 +64,7 @@ int main() {
     printf("qprop ran in %f miliseconds\n", run_time_ms);
 
     free_rotor(hqprop_5137);
-    free_airfoil(naca2411);
+    free_airfoil(clark_y);
     free_rotor_performance(perf1);
     return 0;
 }
