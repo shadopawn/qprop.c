@@ -116,19 +116,23 @@ static void solve_point(Pt* p, Rotor* rot, double Uinf, double Omega,
         el.dr   = rot->sections[i+1].r - rot->sections[i].r;
         el.airfoil = &(rot->sections[i+1].airfoil);
 
-        //mirror the solve inside qprop(): brake branch first for reversed
-        //freestream, momentum/empirical branch otherwise or as fallback
-        ResidualArgs args = {Uinf, Omega*el.r, R, B, &el, rho, mu, a_sound, 0};
+        //mirror the solve inside qprop(): positive half-plane is the primary
+        //bracket, negative half-plane only as a fallback in reversed freestream
+        ResidualArgs args = {Uinf, Omega*el.r, R, B, &el, rho, mu, a_sound};
         const double phi_eps = 1e-6;
         double phi = 0.0;
         int ok = 0;
         if (Uinf < 0.0) {
-            args.brake = 1;
-            ok = solve_bracket(&phi, -PI/2 + phi_eps, -phi_eps, tol, itmax, &args);
+            double M = 0.0;
+            if (point_M(&args, &M) && M < -phi_eps) {
+                ok = solve_bracket(&phi, -PI/2 + phi_eps, M, tol, itmax, &args, 0);
+            }
         }
         if (!ok) {
-            args.brake = 0;
-            ok = solve_bracket(&phi, phi_eps, PI/2, tol, itmax, &args);
+            ok = solve_bracket(&phi, phi_eps, PI/2, tol, itmax, &args, 0);
+        }
+        if (!ok) {
+            ok = solve_bracket(&phi, phi_eps, PI/2, tol, itmax, &args, 1);
         }
         if (!ok) { p->converged = 0; return; }
         ResidualOutput o;

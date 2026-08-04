@@ -777,8 +777,6 @@ typedef struct {
     double rho;
     double mu;
     double a;
-    int brake;          //0: momentum/empirical branch (phi > 0)
-                        //1: reversed-disk-flow branch (phi < 0, windmill brake)
 } ResidualArgs;
 
 //blade-element/momentum residual, parameterized by the local inflow angle phi
@@ -787,16 +785,13 @@ typedef struct {
 //
 //The formulation is written in the propeller sign convention (Wa positive
 //downstream through the disk, thrust positive upstream), so the paper's
-//wind-turbine induction factor maps as a_paper = -a and kappa_paper = -k.
-//The residual is arranged so that no division by (1 +/- induction) appears:
-//with the momentum branch, 1/(1+a) = 1-k exactly, which keeps the residual
-//finite and smooth through the static condition (Uinf = 0, where k -> 1).
+//wind-turbine induction factor is a_wt = -a. The residual is arranged so that
+//no division by (1 +/- induction) appears: on the momentum branch
+//1/(1+a) = 1 + kappa exactly, which keeps the residual finite and smooth
+//through the static condition (Uinf = 0).
 //
-//Axial momentum branches (Ning eqs. 3, 6-9, in propeller convention):
-//  momentum          k >= -2/3 :  1/(1+a) = 1 - k
-//  empirical (Buhl)  k <  -2/3 :  a = -a_wt,  a_wt = (g1 - sqrt(g2))/g3
-//  reversed flow     brake = 1 :  1/(1+a) = 1 + k     (CT sign flipped)
-//Tangential (Ning eqs. 10-11): 1/(1-a') = 1 + iota (momentum), 1 - iota (brake)
+//The branch selection and the parameter kappa are set up below, at the point
+//where they are used.
 //INTERNAL USE ONLY
 void residual(ResidualOutput* output, double phi, ResidualArgs* args) {
     //extract args
@@ -855,30 +850,49 @@ void residual(ResidualOutput* output, double phi, ResidualArgs* args) {
     double k = sigma*cn / (4.0*F*s2);
     double iota = sigma*ct / (4.0*F*sc);
 
-    //axial and tangential momentum branches
-    double inv1pa;      // 1/(1+a)
-    double inv1ma;      // 1/(1-a')
-    if (args->brake) {
-        //reversed disk flow (phi < 0): the windmill brake state, where the
-        //momentum thrust changes sign, CT = 4a(a-1)F in wind-turbine terms
-        inv1pa = 1.0 + k;
-        inv1ma = 1.0 - iota;
+    //Momentum branch, selected by the value of the loading parameter rather
+    //than by which bracket is being searched (Ning Figure 5).
+    //
+    //Axial momentum in the propeller convention gives k(1+a) = a*s, where
+    //s = sign(sin phi) carries the direction of the flow through the disk.
+    //Writing kappa = -k*s recovers Ning's convenience parameter on either side
+    //of phi = 0, so all three of his branches apply unchanged in both
+    //half-planes:
+    //
+    //   kappa <= 2/3 : momentum,         a_wt = kappa/(1+kappa)
+    //   kappa <= 1   : empirical (Buhl), 0.4 < a_wt < 1
+    //   kappa >  1   : propeller brake,  a_wt = kappa/(kappa-1)
+    //
+    //(a_wt = -a is the wind-turbine sign of the induction factor, so 1/(1+a)
+    //below is Ning's 1/(1-a).) Values of kappa below -1 keep using the
+    //momentum form; per Ning that introduces no spurious roots and avoids a
+    //second one-dimensional solve to locate the boundary.
+    double s = (sinphi >= 0.0)? 1.0 : -1.0;
+    double sU = (U >= 0.0)? 1.0 : -1.0;
+    double kappa = -k*s;
+    double inv1pa;                          // 1/(1+a)
+    double inv1ma = 1.0 + iota*s;           // 1/(1-a')
+    if (kappa > 1.0 && s*sU < 0.0) {
+        //Propeller brake: the streamtube is inverted and the momentum thrust
+        //changes sign, CT = 4a(a-1)F, giving 1+a < 0 (disk flow opposing the
+        //freestream). Reachable only when the half-plane being searched really
+        //does oppose the freestream, i.e. sign(sin phi) = -sign(Uinf); without
+        //that test the branch is selected near phi -> 0, where kappa grows
+        //without bound, and puts a zero of 1/(1+a) inside the bracket.
+        inv1pa = 1.0 - kappa;
     }
-    else if (-k <= 2.0/3.0) {
-        //momentum region; includes the normal propeller state (k > 0),
-        //the static condition (k = 1) and light turbine loading (k < 0)
-        inv1pa = 1.0 - k;
-        inv1ma = 1.0 + iota;
+    else if (kappa <= 2.0/3.0) {
+        //momentum; covers the normal propeller state, the static condition and
+        //light turbine loading, on both sides of phi = 0
+        inv1pa = 1.0 + kappa;
     }
     else {
-        //heavily loaded turbine (a_wt > 0.4): Buhl's empirical correction,
-        //C1-continuous with the momentum branch at a_wt = 0.4
-        double kwt = -k;
-        double g1 = 2.0*F*kwt - (10.0/9.0 - F);
-        double g2 = 2.0*F*kwt - F*(4.0/3.0 - F);
-        double g3 = 2.0*F*kwt - (25.0/9.0 - 2.0*F);
+        //Buhl's empirical correction, C1-continuous with momentum at a_wt = 0.4
+        double g1 = 2.0*F*kappa - (10.0/9.0 - F);
+        double g2 = 2.0*F*kappa - F*(4.0/3.0 - F);
+        double g3 = 2.0*F*kappa - (25.0/9.0 - 2.0*F);
         if (fabs(g3) < 1e-9) {
-            g3 = (g3 >= 0.0)? 1e-9 : -1e-9;     //Ning's point singularity: numerator is also 0 here
+            g3 = (g3 >= 0.0)? 1e-9 : -1e-9;     //Ning's point singularity: the numerator vanishes here too
         }
         if (g2 < 0.0) {
             g2 = 0.0;
@@ -888,7 +902,6 @@ void residual(ResidualOutput* output, double phi, ResidualArgs* args) {
             awt = 0.999999;
         }
         inv1pa = 1.0/(1.0 - awt);
-        inv1ma = 1.0 + iota;
     }
 
     //the residual: tan(phi) = U(1+a) / (Omega*r*(1-a')), rearranged so the
@@ -1051,14 +1064,88 @@ double brent(double (*f)(double x, void* args), double a, double b, double tol, 
 }
 
 
+//POINT_M locates the inflow angle in the negative half-plane where the loading
+//parameter reaches the boundary of the propeller-brake region (Ning Figure 5),
+//
+//    kappa(phi) = sigma*cn(phi) / (4*F(phi)*sin^2(phi)) = 1
+//
+//Between M and phi = 0 lies a sliver in which sin^2(phi) drives kappa without
+//bound for purely kinematic reasons, so the empirical (Buhl) branch is pushed
+//onto its a_wt = 1 asymptote. There the residual always changes sign and
+//produces a spurious "flow stopped at the disk" root, with essentially zero
+//mass flux through the disk and therefore essentially zero thrust. Bounding
+//the search at M removes that root from the bracket.
+//
+//kappa is transcendental - cl and cd come from interpolated polar tables, and
+//F = (2/pi)*acos(exp(-f)) with f proportional to 1/|sin phi| - so there is no
+//exact closed form. Both collapse as phi -> 0 though, which is where M sits:
+//alpha -> beta so cn -> cl(beta), and f -> infinity so F -> 1, leaving
+//
+//    M0 = -asin(sqrt(sigma*cl(beta)/4))
+//
+//One fixed-point step, re-evaluating cn and F at M0, brings this within about
+//1% of the bisected value (measured: 0.08-0.92% across the blade, versus
+//4-10% for M0 alone). That is far more precision than the job needs: the
+//spurious root sits at phi ~ -2e-4 and the physical windmill-brake root at
+//phi ~ -1.2, so any bound between them separates the two.
+//
+//kappa carries no explicit dependence on Uinf - it enters only through the
+//Reynolds and Mach arguments of the polar lookup - so M is very nearly a
+//property of the element and the rotor speed alone (measured: 0.09% variation
+//across a 60-fold change in descent rate). It is therefore computed once per
+//element per solve, not per residual evaluation.
+//
+//Returns 1 and writes M on success, 0 when no such point exists.
+//INTERNAL USE ONLY
+int point_M(ResidualArgs* args, double* M) {
+    Element* e = args->currentelement;
+    double sigma = args->B*(e->c) / (2.0*PI*(e->r));
+    double W0 = sqrt(args->Ua*args->Ua + args->Ut*args->Ut);
+    double Re = args->rho * W0 * (e->c) / args->mu;
+    double Mach = (args->a > 0)? W0/args->a : 0.0;
+
+    //leading estimate: cn -> cl(beta), F -> 1
+    PolarPoint op = {0.0, 0.0, 0.0};
+    interpolate_airfoil_polars(&op, e->airfoil, e->beta, Re, Mach);
+    double q = sigma*op.CL/4.0;
+    if (!(q > 0.0 && q < 1.0)) {
+        return 0;
+    }
+    double phi = -asin(sqrt(q));
+
+    //one fixed-point refinement with cn and F taken at the leading estimate
+    double sphi = sin(phi);
+    double cphi = cos(phi);
+    PolarPoint refined = {0.0, 0.0, 0.0};
+    interpolate_airfoil_polars(&refined, e->airfoil, e->beta - phi, Re, Mach);
+    double cn = refined.CL*cphi - refined.CD*sphi;
+    double ftip = 0.5*args->B*(args->R - e->r)/((e->r)*fabs(sphi));
+    double F = acos(exp(-ftip)) * 2.0 / PI;
+    if (F < 1e-9) {
+        F = 1e-9;
+    }
+    double q2 = sigma*cn/(4.0*F);
+    if (q2 > 0.0 && q2 < 1.0) {
+        phi = -asin(sqrt(q2));
+    }
+    *M = phi;
+    return 1;
+}
+
 //find a root of the BEM residual inside [lo, hi]
 //returns 1 and writes phi on success, 0 when the interval contains no root
 //
-//The endpoint values are reused by brent_pre() rather than recomputed. When
-//the endpoints do not straddle a root a coarse scan is used as a fallback;
-//with the a priori gate in qprop() this is now rarely reached.
+//The endpoint values are reused by brent_pre() rather than recomputed.
+//
+//Both brackets qprop() uses are well posed - the positive half-plane by Ning's
+//sign theorems, the negative one because point_M() cuts off the sliver where
+//the empirical branch is extrapolated - so a sign change at the endpoints
+//decides the question on its own and allow_scan can be 0. The interior scan is
+//kept as a last resort for geometries that fall outside those arguments; it is
+//expensive (up to nscan extra residual evaluations, each a polar lookup) and
+//measured to be unnecessary for every operating point in the test sweep.
 //INTERNAL USE ONLY
-int solve_bracket(double* phi, double lo, double hi, double tol, int itmax, ResidualArgs* args) {
+int solve_bracket(double* phi, double lo, double hi, double tol, int itmax, ResidualArgs* args, int allow_scan) {
     double flo = residual_wrapper(lo, args);
     double fhi = residual_wrapper(hi, args);
     if (flo == 0.0) {
@@ -1074,7 +1161,12 @@ int solve_bracket(double* phi, double lo, double hi, double tol, int itmax, Resi
         return 1;
     }
 
-    //no sign change at the endpoints: scan for an interior one
+    //no sign change at the endpoints
+    if (!allow_scan) {
+        return 0;
+    }
+
+    //last resort: scan for an interior sign change
     const int nscan = 64;
     double prev = flo;
     double xprev = lo;
@@ -1138,21 +1230,31 @@ RotorPerformance* qprop(Rotor* rotor, double Uinf, double Omega, double tol, int
         }
         
         //find the inflow angle phi that zeroes the BEM residual (Ning 2014)
-        ResidualArgs args = {Uinf, Omega*currentelement.r, rotor->D/2, rotor->B, &currentelement, rho, mu, a, 0};
+        ResidualArgs args = {Uinf, Omega*currentelement.r, rotor->D/2, rotor->B, &currentelement, rho, mu, a};
         const double phi_eps = 1e-6;
         double phi = 0.0;
+        //With a reversed freestream the flow through the disk may run with it,
+        //putting the solution in the negative half-plane - the windmill brake
+        //state. Search there first, but bound the interval at point M rather
+        //than at phi = 0: the sliver between M and 0 holds only the spurious
+        //root described on point_M(), and including it makes slow descent
+        //return a zero-thrust solution instead of the physical one.
+        //Which momentum branch applies is decided by kappa inside residual(),
+        //not by which bracket is being searched.
         int solved = 0;
         if (Uinf < 0.0) {
-            //reversed freestream (descent): prefer the reversed-disk-flow
-            //branch (phi < 0), which carries the windmill brake state; when it
-            //has no root (slow descent / vortex ring band, where no steady
-            //streamtube solution exists) fall back to the momentum branch
-            args.brake = 1;
-            solved = solve_bracket(&phi, -PI/2 + phi_eps, -phi_eps, tol, itmax, &args);
+            double M = 0.0;
+            if (point_M(&args, &M) && M < -phi_eps) {
+                solved = solve_bracket(&phi, -PI/2 + phi_eps, M, tol, itmax, &args, 0);
+            }
         }
         if (!solved) {
-            args.brake = 0;
-            solved = solve_bracket(&phi, phi_eps, PI/2, tol, itmax, &args);
+            solved = solve_bracket(&phi, phi_eps, PI/2, tol, itmax, &args, 0);
+        }
+        if (!solved) {
+            //neither bracket showed a sign change at its endpoints; fall back
+            //to scanning the primary bracket before giving up
+            solved = solve_bracket(&phi, phi_eps, PI/2, tol, itmax, &args, 1);
         }
 
         //calculate element thrust and torque

@@ -67,8 +67,7 @@ int main() {
         &tipelement,
         1.225,
         1.81e-5,
-        0.0,
-        0                           //momentum/empirical branch
+        0.0
     };
     ResidualOutput residual2;
     residual(&residual2, deg2rad(+45.0), &args2);
