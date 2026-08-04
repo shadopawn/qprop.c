@@ -37,6 +37,17 @@ typedef struct {
     double* CL;         //array of lift coefficients - same size as alpha
     double* CD;         //array of drag coefficients - same size as alpha
     int size;           //number of points in the polar
+    //Uniform-alpha resampling of the polar, built once at load time. Lookups
+    //then cost index arithmetic instead of a linear scan over alpha. The grid
+    //is at least as fine as the source data, so it reproduces the scanned
+    //interpolation to within rounding inside the data range, and it also bakes
+    //in the post-stall extrapolation outside it. These fields are appended so
+    //that the offsets of the ones above are unchanged.
+    double* gridCL;     //NULL when the grid has not been built
+    double* gridCD;
+    int gridN;          //number of grid points
+    double gridA0;      //alpha of the first grid point (rad)
+    double gridDA;      //grid spacing (rad)
 } Polar;
 
 //data structure for airfoils

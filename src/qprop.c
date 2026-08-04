@@ -39,6 +39,9 @@
 #define PI 3.14159265358979323846   //avoid potential issues with M_PI
 #define MAX_LINE_LENGTH 256         //maximum length of a line in a xfoil polar file
 
+//defined further down, once PolarPoint exists; the polar loaders call it
+void build_polar_grid(Polar* currentpolar);
+
 
 //converts degrees to radians
 double deg2rad(double deg) {
@@ -59,6 +62,11 @@ Polar* read_xfoil_polar_from_file(const char *filename) {
     newpolar->CL = NULL;
     newpolar->CD = NULL;
     newpolar->size = 0;
+    newpolar->gridCL = NULL;
+    newpolar->gridCD = NULL;
+    newpolar->gridN = 0;
+    newpolar->gridA0 = 0.0;
+    newpolar->gridDA = 0.0;
 
     FILE* fileio = fopen(filename, "rb");
     if (!fileio) {
@@ -138,6 +146,7 @@ Polar* read_xfoil_polar_from_file(const char *filename) {
         free(newpolar);
         return NULL;
     }
+    build_polar_grid(newpolar);
     return newpolar;
 }
 
@@ -155,6 +164,15 @@ void free_polar(Polar* currentpolar) {
         free(currentpolar->CD);
         currentpolar->CD = NULL;
     }
+    if (currentpolar->gridCL) {
+        free(currentpolar->gridCL);
+        currentpolar->gridCL = NULL;
+    }
+    if (currentpolar->gridCD) {
+        free(currentpolar->gridCD);
+        currentpolar->gridCD = NULL;
+    }
+    currentpolar->gridN = 0;
     free(currentpolar);
     currentpolar = NULL;
 }
@@ -282,6 +300,7 @@ Airfoil* analytic_polar_curves(double CL0, double CL_a, double CLmin, double CLm
             newairfoil->polars[i]->CL[j] = CL;
             newairfoil->polars[i]->CD[j] = CD;
         }
+        build_polar_grid(newairfoil->polars[i]);
     }
     return newairfoil;
 }
@@ -322,9 +341,10 @@ void extrapolate_polar_post_stall(double alpha_s, double CL_s, double CD_s, doub
     *CD = B1*sin_a*sin_a + B2*cos_a;
 }
 
-//interpolate airfoil coefficient across a polar
+//interpolate airfoil coefficient across a polar, scanning the stored points
+//this is the reference path: it is what the uniform grid is built from
 //INTERNAL USE ONLY
-void interpolate_polar(PolarPoint* out, Polar* currentpolar, double alpha) {
+void interpolate_polar_exact(PolarPoint* out, Polar* currentpolar, double alpha) {
     out->alpha = alpha;
     out->CL = 0.0;
     out->CD = 0.0;
@@ -383,6 +403,98 @@ void interpolate_polar(PolarPoint* out, Polar* currentpolar, double alpha) {
         }
     }
     return;
+}
+
+//BUILD_POLAR_GRID resamples a polar onto a uniform alpha grid, so that lookups
+//inside the data range cost index arithmetic instead of a scan over the points.
+//
+//Only the data range is gridded. Outside it the coefficients come from the
+//Viterna extrapolation, which is closed form and already needs no search, so
+//there is nothing to gain there and gridding it would only add sampling error.
+//
+//The spacing is the finest present in the source data, and the nodes are
+//aligned to the stored alphas. Every stored point therefore lands exactly on a
+//node, and within a gap the source is itself linear, so the resampled curve
+//reproduces the scanned one to the last bit rather than approximating it.
+//INTERNAL USE ONLY
+void build_polar_grid(Polar* currentpolar) {
+    if (!currentpolar || currentpolar->size < 2) {
+        return;
+    }
+
+    //finest spacing present in the source data
+    double da = fabs(currentpolar->alpha[currentpolar->size-1] - currentpolar->alpha[0]);
+    for (int i=1; i<currentpolar->size; ++i) {
+        double d = fabs(currentpolar->alpha[i] - currentpolar->alpha[i-1]);
+        if (d > 1e-9 && d < da) {
+            da = d;
+        }
+    }
+    if (da < 1e-9) {
+        return;
+    }
+
+    double a0 = currentpolar->alpha[0];
+    double span = currentpolar->alpha[currentpolar->size-1] - a0;
+    if (span <= 0.0) {
+        return;
+    }
+    int n = (int)floor(span/da + 0.5) + 1;
+    if (n < 2 || n > 100000) {
+        return;
+    }
+
+    double* gCL = (double*) malloc(n*sizeof(double));
+    double* gCD = (double*) malloc(n*sizeof(double));
+    if (!gCL || !gCD) {
+        free(gCL);
+        free(gCD);
+        return;
+    }
+
+    //the first node sits on alpha[0], where interpolate_polar_exact() would
+    //take its "below the range" branch, so seed it from the stored point
+    gCL[0] = currentpolar->CL[0];
+    gCD[0] = currentpolar->CD[0];
+    for (int i=1; i<n; ++i) {
+        PolarPoint p = {0.0, 0.0, 0.0};
+        interpolate_polar_exact(&p, currentpolar, a0 + i*da);
+        gCL[i] = p.CL;
+        gCD[i] = p.CD;
+    }
+
+    free(currentpolar->gridCL);
+    free(currentpolar->gridCD);
+    currentpolar->gridCL = gCL;
+    currentpolar->gridCD = gCD;
+    currentpolar->gridN = n;
+    currentpolar->gridA0 = a0;
+    currentpolar->gridDA = da;
+}
+
+//interpolate airfoil coefficients across a polar
+//uses the uniform grid inside the data range, the scanned/extrapolated path
+//everywhere else
+//INTERNAL USE ONLY
+void interpolate_polar(PolarPoint* out, Polar* currentpolar, double alpha) {
+    if (currentpolar->gridCL && currentpolar->gridN >= 2
+            && alpha > currentpolar->gridA0
+            && alpha <= currentpolar->alpha[currentpolar->size-1]) {
+        double x = (alpha - currentpolar->gridA0)/currentpolar->gridDA;
+        int i = (int)x;
+        if (i < 0) {
+            i = 0;
+        }
+        if (i > currentpolar->gridN - 2) {
+            i = currentpolar->gridN - 2;
+        }
+        double f = x - (double)i;
+        out->alpha = alpha;
+        out->CL = currentpolar->gridCL[i] + f*(currentpolar->gridCL[i+1] - currentpolar->gridCL[i]);
+        out->CD = currentpolar->gridCD[i] + f*(currentpolar->gridCD[i+1] - currentpolar->gridCD[i]);
+        return;
+    }
+    interpolate_polar_exact(out, currentpolar, alpha);
 }
 
 //interpolate airfoil polars
