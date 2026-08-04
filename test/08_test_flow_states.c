@@ -125,15 +125,13 @@ static void solve_point(Pt* p, Rotor* rot, double Uinf, double Omega,
         if (Uinf < 0.0) {
             double M = 0.0;
             if (point_M(&args, &M) && M < -phi_eps) {
-                ok = solve_bracket(&phi, -PI/2 + phi_eps, M, tol, itmax, &args, 0);
+                ok = solve_bracket(&phi, -PI/2 + phi_eps, M, tol, itmax, &args);
             }
         }
         if (!ok) {
-            ok = solve_bracket(&phi, phi_eps, PI/2, tol, itmax, &args, 0);
+            ok = solve_bracket(&phi, phi_eps, PI/2, tol, itmax, &args);
         }
-        if (!ok) {
-            ok = solve_bracket(&phi, phi_eps, PI/2, tol, itmax, &args, 1);
-        }
+
         if (!ok) { p->converged = 0; return; }
         ResidualOutput o;
         residual(&o, phi, &args);

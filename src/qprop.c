@@ -1216,12 +1216,9 @@ int point_M(ResidualArgs* args, double* M) {
 //Both brackets qprop() uses are well posed - the positive half-plane by Ning's
 //sign theorems, the negative one because point_M() cuts off the sliver where
 //the empirical branch is extrapolated - so a sign change at the endpoints
-//decides the question on its own and allow_scan can be 0. The interior scan is
-//kept as a last resort for geometries that fall outside those arguments; it is
-//expensive (up to nscan extra residual evaluations, each a polar lookup) and
-//measured to be unnecessary for every operating point in the test sweep.
+//decides the question on its own
 //INTERNAL USE ONLY
-int solve_bracket(double* phi, double lo, double hi, double tol, int itmax, ResidualArgs* args, int allow_scan) {
+int solve_bracket(double* phi, double lo, double hi, double tol, int itmax, ResidualArgs* args) {
     double flo = residual_wrapper(lo, args);
     double fhi = residual_wrapper(hi, args);
     if (flo == 0.0) {
@@ -1237,25 +1234,6 @@ int solve_bracket(double* phi, double lo, double hi, double tol, int itmax, Resi
         return 1;
     }
 
-    //no sign change at the endpoints
-    if (!allow_scan) {
-        return 0;
-    }
-
-    //last resort: scan for an interior sign change
-    const int nscan = 64;
-    double prev = flo;
-    double xprev = lo;
-    for (int i=1; i<=nscan; ++i) {
-        double x = lo + (hi-lo)*i/(double)nscan;
-        double fx = residual_wrapper(x, args);
-        if (prev*fx <= 0.0) {
-            *phi = brent_pre(residual_wrapper, xprev, x, prev, fx, tol, itmax, args);
-            return 1;
-        }
-        prev = fx;
-        xprev = x;
-    }
     return 0;
 }
 
@@ -1321,16 +1299,11 @@ RotorPerformance* qprop(Rotor* rotor, double Uinf, double Omega, double tol, int
         if (Uinf < 0.0) {
             double M = 0.0;
             if (point_M(&args, &M) && M < -phi_eps) {
-                solved = solve_bracket(&phi, -PI/2 + phi_eps, M, tol, itmax, &args, 0);
+                solved = solve_bracket(&phi, -PI/2 + phi_eps, M, tol, itmax, &args);
             }
         }
         if (!solved) {
-            solved = solve_bracket(&phi, phi_eps, PI/2, tol, itmax, &args, 0);
-        }
-        if (!solved) {
-            //neither bracket showed a sign change at its endpoints; fall back
-            //to scanning the primary bracket before giving up
-            solved = solve_bracket(&phi, phi_eps, PI/2, tol, itmax, &args, 1);
+            solved = solve_bracket(&phi, phi_eps, PI/2, tol, itmax, &args);
         }
 
         //calculate element thrust and torque
