@@ -584,6 +584,7 @@ Rotor* import_rotor_geometry_apc(const char *filename, Airfoil* airfoil) {
     newrotor->B = 0;
     newrotor->nsections = 0;
     newrotor->sections = NULL;
+    newrotor->state = NULL;      //warm starting is opt-in, see prop_state_new()
 
     FILE* fileio = fopen(filename, "rb");
     if (!fileio) {
@@ -700,6 +701,7 @@ Rotor* import_rotor_geometry_uiuc(const char *filename, Airfoil* airfoil, double
     newrotor->B = B;
     newrotor->nsections = 0;
     newrotor->sections = NULL;
+    newrotor->state = NULL;      //warm starting is opt-in, see prop_state_new()
 
     FILE* fileio = fopen(filename, "rb");
     if (!fileio) {
@@ -788,6 +790,7 @@ Rotor* refine_rotor_sections(Rotor* oldrotor, int nsections) {
     newrotor->D = oldrotor->D;
     newrotor->B = oldrotor->B;
     newrotor->nsections = nsections;
+    newrotor->state = NULL;      //a refined rotor starts without inherited state
     newrotor->sections = (Section*) calloc(nsections, sizeof(Section));
     if (!newrotor->sections) {
         printf("ERROR: memory allocation error in refine_rotor_sections()\n");
@@ -848,6 +851,7 @@ Rotor* refine_rotor_sections(Rotor* oldrotor, int nsections) {
 
 //free allocated memory on a Rotor
 void free_rotor(Rotor* currentrotor) {
+    prop_state_free(currentrotor);      //the rotor owns its warm-start state
     free(currentrotor->sections);
     currentrotor->sections = NULL;
     free(currentrotor);
@@ -1237,8 +1241,108 @@ int solve_bracket(double* phi, double lo, double hi, double tol, int itmax, Resi
     return 0;
 }
 
+//refine a root from a nearby starting guess with the secant method
+//returns 1 and writes phi on success, 0 when the caller should bracket instead
+//
+//The iterate is held inside the half of the phi domain the seed came from,
+//because the two halves are different flow states and crossing between them
+//mid-iteration is meaningless. Anything that leaves the domain, changes sign or
+//stalls hands back to the bracketed solve, so a failure here costs a little
+//time but never accuracy.
+//INTERNAL USE ONLY
+int solve_secant(double* phi, double seed, double tol, int itmax, ResidualArgs* args) {
+    const double phi_eps = 1e-6;
+    if (!(seed > -PI/2 && seed < PI/2) || fabs(seed) < phi_eps) {
+        return 0;
+    }
+    double side = (seed > 0.0)? 1.0 : -1.0;
+    double step = (seed > 0.0)? 1e-4 : -1e-4;
+    double x0 = seed;
+    double x1 = seed + step;
+    if (!(x1 > -PI/2 && x1 < PI/2)) {
+        return 0;
+    }
+    double f0 = residual_wrapper(x0, args);
+    double f1 = residual_wrapper(x1, args);
+
+    int maxit = (itmax < 12)? itmax : 12;
+    for (int i=0; i<maxit; ++i) {
+        if (fabs(f1) <= tol) {
+            *phi = x1;
+            return 1;
+        }
+        double den = f1 - f0;
+        if (fabs(den) < 1e-300) {
+            return 0;
+        }
+        double x2 = x1 - f1*(x1 - x0)/den;
+        if (!(x2 > -PI/2 && x2 < PI/2) || x2*side <= 0.0) {
+            return 0;
+        }
+        x0 = x1;
+        f0 = f1;
+        x1 = x2;
+        f1 = residual_wrapper(x1, args);
+    }
+    if (fabs(f1) <= tol) {
+        *phi = x1;
+        return 1;
+    }
+    return 0;
+}
+
+//release a rotor's warm-start state and return it to stateless solving
+void prop_state_free(Rotor* rotor) {
+    if (!rotor || !rotor->state) {
+        return;
+    }
+    free(rotor->state->phi);
+    rotor->state->phi = NULL;
+    rotor->state->nelems = 0;
+    rotor->state->valid = 0;
+    free(rotor->state);
+    rotor->state = NULL;
+}
+
+//attach a warm-start state to a rotor, enabling warm starting on later solves
+PropState* prop_state_new(Rotor* rotor) {
+    if (!rotor || rotor->nsections < 2) {
+        return NULL;
+    }
+    if (rotor->state && rotor->state->nelems == rotor->nsections - 1) {
+        return rotor->state;        //already attached, and the right size
+    }
+    prop_state_free(rotor);         //wrong size: rebuild it
+
+    PropState* state = calloc(1, sizeof(PropState));
+    if (!state) {
+        printf("ERROR: memory allocation error in prop_state_new()\n");
+        return NULL;
+    }
+    state->nelems = rotor->nsections - 1;
+    state->phi = calloc(state->nelems, sizeof(double));
+    state->valid = 0;
+    if (!state->phi) {
+        printf("ERROR: memory allocation error in prop_state_new()\n");
+        free(state);
+        return NULL;
+    }
+    rotor->state = state;
+    return state;
+}
+
+//discard the stored inflow angles so that the next solve starts cold
+void prop_state_reset(Rotor* rotor) {
+    if (rotor && rotor->state) {
+        rotor->state->valid = 0;
+    }
+}
+
 //run qprop iterations
+//each element is seeded from the previous solve when the rotor carries a
+//warm-start state, and solved from a cold bracket otherwise
 RotorPerformance* qprop(Rotor* rotor, double Uinf, double Omega, double tol, int itmax, double rho, double mu, double a) {
+    PropState* state = rotor->state;
     //initialize variables
     RotorPerformance* perf = calloc(1, sizeof(RotorPerformance));
     if (!perf) {
@@ -1246,6 +1350,9 @@ RotorPerformance* qprop(Rotor* rotor, double Uinf, double Omega, double tol, int
         return NULL;
     }
     int nelems = rotor->nsections - 1;      //number of elements discretizing the blade
+    //a state built for a different rotor cannot seed this one; drop it back to
+    //a cold solve rather than seeding from unrelated angles
+    int warm = (state && state->phi && state->valid && state->nelems == nelems);
     perf->T = 0.0;
     perf->Q = 0.0;
     perf->CT = 0.0;
@@ -1296,7 +1403,12 @@ RotorPerformance* qprop(Rotor* rotor, double Uinf, double Omega, double tol, int
         //Which momentum branch applies is decided by kappa inside residual(),
         //not by which bracket is being searched.
         int solved = 0;
-        if (Uinf < 0.0) {
+        if (warm) {
+            //seed from the previous solve; falls through to bracketing if the
+            //secant does not converge, so accuracy never depends on the seed
+            solved = solve_secant(&phi, state->phi[i], tol, itmax, &args);
+        }
+        if (!solved && Uinf < 0.0) {
             double M = 0.0;
             if (point_M(&args, &M) && M < -phi_eps) {
                 solved = solve_bracket(&phi, -PI/2 + phi_eps, M, tol, itmax, &args);
@@ -1313,6 +1425,9 @@ RotorPerformance* qprop(Rotor* rotor, double Uinf, double Omega, double tol, int
             printf("ERROR while using qprop at blade location #%i: unable to find phi value that is zeroing the residual function (residual=%e exceeds tolerance=%e)\n", i, res.residual, tol);
             free_rotor_performance(perf);
             return NULL;
+        }
+        if (state && state->phi && state->nelems == nelems) {
+            state->phi[i] = phi;        //seed for the next call
         }
         perf->residuals[i] = res.residual;
         perf->Gamma[i] = res.Gamma;
@@ -1332,6 +1447,11 @@ RotorPerformance* qprop(Rotor* rotor, double Uinf, double Omega, double tol, int
     double CQ = perf->Q / (rho * pow(n,2) * pow(rotor->D,5));       //torque coefficient
     perf->CP = 2*PI * CQ;             //power coefficient
     perf->J = Uinf / (n * rotor->D);    //advance ratio
+    if (state && state->phi && state->nelems == nelems) {
+        //every element converged, so the stored angles are all usable seeds
+        state->valid = 1;
+        perf->state = state;        //borrowed, not owned: the rotor frees it
+    }
     return perf;
 }
 
