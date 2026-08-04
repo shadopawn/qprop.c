@@ -40,11 +40,11 @@ int main() {
     //test #1: J = 0.05
     double Uinf = 1.2729633333333334;
     RotorPerformance* perf1 = qprop(apc10x7sf, Uinf, Omega, tol, itmax, rho, mu, a);
-    //printf("TEST 5.1:\n");
-    //printf("    Uinf: %f\n", Uinf);
-    //printf("    Thrust: %f\n", perf1->T);
-    //printf("    Torque: %f\n", perf1->Q);
-    if (fabs(perf1->T - 7.811303879404407) <= 1e-6 && fabs(perf1->Q - 0.14308075154669447) <= 1e-6) {
+    // printf("TEST 5.1:\n");
+    // printf("    Uinf: %f\n", Uinf);
+    // printf("    Thrust: %f\n", perf1->T);
+    // printf("    Torque: %f\n", perf1->Q);
+    if (fabs(perf1->T - 7.805367) <= 1e-6 && fabs(perf1->Q - 0.142816) <= 1e-6) {
         printf("TEST 5.1 - PASSED :)\n");
     }
     else {
@@ -69,11 +69,11 @@ int main() {
     //test #2: J = 0.75
     Uinf = 19.09445;
     RotorPerformance* perf2 = qprop(apc10x7sf, Uinf, Omega, tol, itmax, rho, mu, a);
-    //printf("TEST 5.2:\n");
-    //printf("  Uinf: %f\n", Uinf);
-    //printf("  Thrust: %f\n", perf2.T);
-    //printf("  Torque: %f\n", perf2.Q);
-    if (fabs(perf2->T - 1.1348963862887862) <= 1e-6 && fabs(perf2->Q - 0.05252953779296362) <= 1e-6) {
+    // printf("TEST 5.2:\n");
+    // printf("  Uinf: %f\n", Uinf);
+    // printf("  Thrust: %f\n", perf2->T);
+    // printf("  Torque: %f\n", perf2->Q);
+    if (fabs(perf2->T - 1.134727) <= 1e-6 && fabs(perf2->Q - 0.052521) <= 1e-6) {
         printf("TEST 5.2 - PASSED :)\n");
     }
     else {

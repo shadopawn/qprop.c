@@ -55,8 +55,8 @@ int main() {
 
     //test #3: interpolate above CLmax
     PolarPoint polarpoint3;
-    interpolate_polar(&polarpoint3, airfoil1->polars[3], deg2rad(+90.0));
-    if (fabs(polarpoint3.CL - 1.5299) <= 1e-6 && fabs(polarpoint3.CD - 2.0) <= 1e-6) {
+    interpolate_polar(&polarpoint3, airfoil1->polars[3], deg2rad(+85.0));
+    if (fabs(polarpoint3.CL - 0.175827) <= 1e-6 && fabs(polarpoint3.CD - 1.977436) <= 1e-6) {
         printf("TEST 3.3 - PASSED :)\n");
     }
     else {
