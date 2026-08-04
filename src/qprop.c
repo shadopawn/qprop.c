@@ -329,19 +329,14 @@ void interpolate_polar(PolarPoint* out, Polar* currentpolar, double alpha) {
     out->CL = 0.0;
     out->CD = 0.0;
 
-    //past this AoA, qprop tends to fail to converge, so the extrapolated
-    //coefficients are held constant beyond it rather than extrapolated further
-    const double ALPHA_EXTRAPOLATION_LIMIT = 89.0*PI/180.0;
-
     if (alpha <= currentpolar->alpha[0]) {
         //below minimum AoA: extrapolate CL and CD with the Viterna-Corrigan
         //flat-plate post-stall model, anchored at the lowest polar point
-        double alpha_eval = (alpha < -ALPHA_EXTRAPOLATION_LIMIT)? -ALPHA_EXTRAPOLATION_LIMIT : alpha;
         extrapolate_polar_post_stall(
             currentpolar->alpha[0],
             currentpolar->CL[0],
             currentpolar->CD[0],
-            alpha_eval,
+            alpha,
             &out->CL,
             &out->CD
         );
@@ -353,12 +348,11 @@ void interpolate_polar(PolarPoint* out, Polar* currentpolar, double alpha) {
     else if (alpha > currentpolar->alpha[currentpolar->size-1]) {
         //above maximum AoA: extrapolate CL and CD with the Viterna-Corrigan
         //flat-plate post-stall model, anchored at the highest polar point
-        double alpha_eval = (alpha > ALPHA_EXTRAPOLATION_LIMIT)? ALPHA_EXTRAPOLATION_LIMIT : alpha;
         extrapolate_polar_post_stall(
             currentpolar->alpha[currentpolar->size-1],
             currentpolar->CL[currentpolar->size-1],
             currentpolar->CD[currentpolar->size-1],
-            alpha_eval,
+            alpha,
             &out->CL,
             &out->CD
         );
