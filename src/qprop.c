@@ -1450,7 +1450,6 @@ RotorPerformance* qprop(Rotor* rotor, double Uinf, double Omega, double tol, int
     if (state && state->phi && state->nelems == nelems) {
         //every element converged, so the stored angles are all usable seeds
         state->valid = 1;
-        perf->state = state;        //borrowed, not owned: the rotor frees it
     }
     return perf;
 }

@@ -117,11 +117,6 @@ typedef struct {
     double* dTdr;       //array for blade thrust distribution (N/m)
     double* dQdr;       //array for blade torque distribution (N-m/m)
     int nelems;         //number of elements discretizing a blade
-    //Warm-start state used for this solve, or NULL if the solve was stateless.
-    //Borrowed from the rotor, NOT owned: free_rotor_performance() leaves it
-    //alone and it stays valid until the rotor is freed. Appended so that the
-    //offsets of the fields above are unchanged.
-    PropState* state;
 } RotorPerformance;
 
 
@@ -270,8 +265,8 @@ Rotor* refine_rotor_sections(Rotor* oldrotor, int nsections);
 //  - the current implementation assumes that there is no externally-induced
 //    tangential velocity (Ut = 0)
 //  - when rotor->state is set (see prop_state_new) each element is seeded from
-//    the previous solve, and the state used is returned on the output as
-//    .state; otherwise the solve is stateless and .state is NULL
+//    the previous solve and the state is updated in place on the rotor;
+//    otherwise the solve is stateless
 RotorPerformance* qprop(Rotor* rotor, double Uinf, double Omega, double tol, int itmax, double rho, double mu, double a);
 
 //PROP_STATE_NEW attaches a warm-start state to a rotor, enabling warm starting
