@@ -1043,42 +1043,6 @@ double residual_wrapper(double psi, void* args) {
     return output.residual;
 }
 
-//find the root of a function f(x)=0 using the bisection method
-//INTERNAL USE ONLY
-double bisection(double (*f)(double x, void* args), double a, double b, double tol, int itmax, void* args) {
-    double fa = f(a, args);
-    double fb = f(b, args);
-    if (fa*fb > 0) {
-        printf("ERROR while using bisection: f(a) and f(b) must have opposite signs\n");
-        return a;
-    }
-
-    double c = 0.0;
-    double fc = 0.0;
-    for (int i=0; i<itmax; ++i) {
-        //evaluate mid point
-        c = 0.5*(a+b);
-        fc = f(c, args);
-        //if (fabs(fc) <= tol) {                    //stopping criterion on residual only
-        if (fabs(fc) <= tol && b-a <= tol) {        //stopping criterion on residual and convergence
-            return c;
-        }
-
-        //halve the domain
-        if (fa*fc < 0) {
-            b = c;
-            fb = fc;
-        }
-        else {
-            a = c;
-            fa = fc;
-        }
-    }
-
-    printf("ERROR while using bisection: maximum number of iterations reached\n");
-    return c;
-}
-
 //find the root of a function f(x)=0 using the Brent's method
 //this should be more efficient than bisection, requiring less iterations
 //
