@@ -956,10 +956,12 @@ double bisection(double (*f)(double x, void* args), double a, double b, double t
 
 //find the root of a function f(x)=0 using the Brent's method
 //this should be more efficient than bisection, requiring less iterations
+//
+//brent_pre() takes the endpoint values as arguments, so a caller that has
+//already evaluated them (as the bracketing in qprop() does) does not pay for
+//them twice; brent() is the same routine for callers that have not.
 //INTERNAL USE ONLY
-double brent(double (*f)(double x, void* args), double a, double b, double tol, int itmax, void* args) {
-    double fa = f(a, args);
-    double fb = f(b, args);
+double brent_pre(double (*f)(double x, void* args), double a, double b, double fa, double fb, double tol, int itmax, void* args) {
     if (fa*fb > 0) {
         printf("ERROR while using brent: f(a) and f(b) must have opposite signs\n");
         return a;
@@ -1042,10 +1044,19 @@ double brent(double (*f)(double x, void* args), double a, double b, double tol, 
     return b;
 }
 
+//brent() with the endpoints evaluated internally
+//INTERNAL USE ONLY
+double brent(double (*f)(double x, void* args), double a, double b, double tol, int itmax, void* args) {
+    return brent_pre(f, a, b, f(a, args), f(b, args), tol, itmax, args);
+}
+
+
 //find a root of the BEM residual inside [lo, hi]
-//returns 1 and writes phi on success, 0 when the interval contains no root;
-//the endpoints are checked first, then a coarse scan catches interior
-//sign-change pairs that leave the endpoint signs equal
+//returns 1 and writes phi on success, 0 when the interval contains no root
+//
+//The endpoint values are reused by brent_pre() rather than recomputed. When
+//the endpoints do not straddle a root a coarse scan is used as a fallback;
+//with the a priori gate in qprop() this is now rarely reached.
 //INTERNAL USE ONLY
 int solve_bracket(double* phi, double lo, double hi, double tol, int itmax, ResidualArgs* args) {
     double flo = residual_wrapper(lo, args);
@@ -1059,22 +1070,23 @@ int solve_bracket(double* phi, double lo, double hi, double tol, int itmax, Resi
         return 1;
     }
     if (flo*fhi < 0.0) {
-        *phi = brent(residual_wrapper, lo, hi, tol, itmax, args);
+        *phi = brent_pre(residual_wrapper, lo, hi, flo, fhi, tol, itmax, args);
         return 1;
     }
 
     //no sign change at the endpoints: scan for an interior one
     const int nscan = 64;
     double prev = flo;
+    double xprev = lo;
     for (int i=1; i<=nscan; ++i) {
         double x = lo + (hi-lo)*i/(double)nscan;
         double fx = residual_wrapper(x, args);
         if (prev*fx <= 0.0) {
-            double xprev = lo + (hi-lo)*(i-1)/(double)nscan;
-            *phi = brent(residual_wrapper, xprev, x, tol, itmax, args);
+            *phi = brent_pre(residual_wrapper, xprev, x, prev, fx, tol, itmax, args);
             return 1;
         }
         prev = fx;
+        xprev = x;
     }
     return 0;
 }
