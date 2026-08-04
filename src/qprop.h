@@ -1,9 +1,13 @@
 /*******************************************************************************
     qprop.c: a simple and lightweight library for propeller aerodynamic analysis
 
-    It uses the same mathematical formulation as Mark Drela's QPROP, which makes
-    it well-suited for rotors that operate at low Reynolds numbers and do not
-    feature complex 3D effects.
+    The blade-element/momentum equations are solved with the method of
+    S. Andrew Ning (Wind Energy 17(9), 2014): a bracketed one-dimensional root
+    find on the local inflow angle, with momentum theory switched between the
+    momentum, empirical (Buhl) and reversed-disk-flow branches. Well-suited for
+    rotors that operate at low Reynolds numbers and do not feature complex 3D
+    effects; handles propeller, turbine/windmill and descent windmill brake
+    operation.
 
     Key characteristics:
     - Lightweight and portable: contained in a single file with no dependencies

@@ -18,15 +18,32 @@
     - the speed of sound is set to a finite value, so the high-rpm samples
       exercise the compressibility correction in interpolate_airfoil_polars()
 
+    Every operating point is also written to a CSV so that runs can be compared
+    across a change to the solver. If a baseline is present, the run prints a
+    comparison of both the results (T, Q) and the cost (time per call).
+
     How to run:
     gcc 07_test_performance.c -o 07_test_performance -lm -Wall -Wextra
-    ./07_test_performance
+    ./07_test_performance [tag]          (tag defaults to "current")
+
+    Outputs:
+    07_performance_<tag>.csv    per-point results and timings
+
+    Suggested workflow for a solver change:
+    ./07_test_performance before         <- record the current behaviour
+    ...change the solver...
+    ./07_test_performance after          <- prints deltas against the baseline
+
+    Timings are only comparable between runs on the same machine, built with
+    the same flags, and ideally with the machine otherwise idle.
 
     Author: Andrea Pavan
     License: MIT
 *******************************************************************************/
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include "../src/qprop.c"
 
@@ -91,8 +108,159 @@ static double timer_overhead_seconds(void) {
 #define NRPM        5           //number of rotor speed samples
 #define WARMUP      10          //untimed calls per operating point
 #define SAMPLES     300         //timed calls per operating point
+#define NPOINTS     (NUINF*NRPM)
 
-int main() {
+//below these, two runs are treated as having produced the same answer;
+//both sit comfortably above the CSV's 12-significant-digit round-trip error
+#define TOL_T_SAME  1e-9        //N
+#define TOL_Q_SAME  1e-12       //N-m
+
+//one grid point, kept so the sweep can be written out and diffed later
+typedef struct {
+    double rpm, uinf, J, T, Q;
+    double tmin, tmean, tmax;   //seconds per call
+    int converged;
+} Row;
+
+static void write_csv(const char* path, Row* rows, int n) {
+    FILE* f = fopen(path, "w");
+    if (!f) {
+        printf("    WARNING: could not write %s\n", path);
+        return;
+    }
+    //T, Q and J carry 12 significant digits so that a round-trip through the
+    //file stays well below the thresholds compare() uses to call two runs
+    //identical; %.8f would lose ~1e-8 on a thrust of order 10 N and make an
+    //unchanged solver look like it moved every point
+    fprintf(f, "rpm,uinf,J,T,Q,t_min_ms,t_mean_ms,t_max_ms,converged\n");
+    for (int i=0; i<n; ++i) {
+        fprintf(f, "%.0f,%.4f,%.12g,%.12g,%.12g,%.6f,%.6f,%.6f,%d\n",
+                rows[i].rpm, rows[i].uinf, rows[i].J, rows[i].T, rows[i].Q,
+                rows[i].tmin*1e3, rows[i].tmean*1e3, rows[i].tmax*1e3, rows[i].converged);
+    }
+    fclose(f);
+}
+
+static int read_csv(const char* path, Row* rows, int max) {
+    FILE* f = fopen(path, "r");
+    if (!f) {
+        return 0;
+    }
+    char line[512];
+    if (!fgets(line, sizeof line, f)) {      //header
+        fclose(f);
+        return 0;
+    }
+    int n = 0;
+    while (n < max && fgets(line, sizeof line, f)) {
+        Row* r = &rows[n];
+        if (sscanf(line, "%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%d",
+                   &r->rpm, &r->uinf, &r->J, &r->T, &r->Q,
+                   &r->tmin, &r->tmean, &r->tmax, &r->converged) == 9) {
+            //the CSV stores milliseconds; keep seconds internally
+            r->tmin  *= 1e-3;
+            r->tmean *= 1e-3;
+            r->tmax  *= 1e-3;
+            ++n;
+        }
+    }
+    fclose(f);
+    return n;
+}
+
+static int cmp_double(const void* a, const void* b) {
+    double x = *(const double*)a, y = *(const double*)b;
+    return (x < y)? -1 : ((x > y)? 1 : 0);
+}
+
+//compare a run against a baseline: results first, then cost
+static void compare(Row* cur, int ncur, Row* base, int nbase, const char* path) {
+    printf("\n--- COMPARISON vs %s ---\n", path);
+
+    double worst_dT = 0.0, worst_dT_rel = 0.0, worst_dT_u = 0.0, worst_dT_rpm = 0.0;
+    double worst_dQ = 0.0, worst_dQ_rel = 0.0, worst_dQ_u = 0.0, worst_dQ_rpm = 0.0;
+    int matched = 0, differing = 0, conv_changed = 0;
+    static double ratios[NPOINTS];
+    int nratio = 0;
+
+    for (int i=0; i<ncur; ++i) {
+        Row* b = NULL;
+        for (int j=0; j<nbase; ++j) {
+            if (fabs(base[j].rpm - cur[i].rpm) < 1e-6 && fabs(base[j].uinf - cur[i].uinf) < 1e-6) {
+                b = &base[j];
+                break;
+            }
+        }
+        if (!b) {
+            continue;
+        }
+        ++matched;
+        if (b->converged != cur[i].converged) {
+            ++conv_changed;
+            printf("    convergence changed at Uinf = %+.1f m/s, %.0f rpm: %s -> %s\n",
+                   cur[i].uinf, cur[i].rpm,
+                   b->converged? "converged" : "failed",
+                   cur[i].converged? "converged" : "failed");
+        }
+        if (!b->converged || !cur[i].converged) {
+            continue;
+        }
+
+        double dT = cur[i].T - b->T;
+        double dQ = cur[i].Q - b->Q;
+        double rT = (fabs(b->T) > 1e-9)? fabs(dT)/fabs(b->T) : 0.0;
+        double rQ = (fabs(b->Q) > 1e-9)? fabs(dQ)/fabs(b->Q) : 0.0;
+        if (fabs(dT) > TOL_T_SAME || fabs(dQ) > TOL_Q_SAME) {
+            ++differing;
+        }
+        if (fabs(dT) > fabs(worst_dT)) {
+            worst_dT = dT; worst_dT_rel = rT; worst_dT_u = cur[i].uinf; worst_dT_rpm = cur[i].rpm;
+        }
+        if (fabs(dQ) > fabs(worst_dQ)) {
+            worst_dQ = dQ; worst_dQ_rel = rQ; worst_dQ_u = cur[i].uinf; worst_dQ_rpm = cur[i].rpm;
+        }
+        if (b->tmin > 0.0 && nratio < NPOINTS) {
+            ratios[nratio++] = cur[i].tmin / b->tmin;
+        }
+    }
+
+    printf("    matched %i of %i grid points\n", matched, ncur);
+    if (conv_changed == 0) {
+        printf("    convergence: unchanged at every matched point\n");
+    }
+
+    printf("\n    results:\n");
+    if (differing == 0) {
+        printf("      identical at all %i points (|dT| <= %.0e N, |dQ| <= %.0e N-m)\n",
+               matched, TOL_T_SAME, TOL_Q_SAME);
+    } else {
+        printf("      %i of %i points differ\n", differing, matched);
+        printf("      largest dT = %+.6e N   (%.4f%%)  at Uinf = %+.1f m/s, %.0f rpm\n",
+               worst_dT, worst_dT_rel*100.0, worst_dT_u, worst_dT_rpm);
+        printf("      largest dQ = %+.6e N-m (%.4f%%)  at Uinf = %+.1f m/s, %.0f rpm\n",
+               worst_dQ, worst_dQ_rel*100.0, worst_dQ_u, worst_dQ_rpm);
+    }
+
+    printf("\n    cost (min time per call, this run / baseline):\n");
+    if (nratio == 0) {
+        printf("      no comparable timings\n");
+        return;
+    }
+    qsort(ratios, nratio, sizeof(double), cmp_double);
+    double median = ratios[nratio/2];
+    int faster = 0, slower = 0;
+    for (int i=0; i<nratio; ++i) {
+        if (ratios[i] < 0.98) { ++faster; }
+        else if (ratios[i] > 1.02) { ++slower; }
+    }
+    printf("      median  %.3fx   best %.3fx   worst %.3fx\n", median, ratios[0], ratios[nratio-1]);
+    printf("      faster at %i points, slower at %i, within +-2%% at %i\n",
+           faster, slower, nratio - faster - slower);
+    printf("      (timings only comparable on the same machine and build flags)\n");
+}
+
+int main(int argc, char** argv) {
+    const char* tag = (argc > 1)? argv[1] : "current";
     const char* clark_y_filenames[12] = {
         "../webgui/airfoil_polars/clark_y_Ncrit=7/CLARK Y AIRFOIL_T1_Re0.010_M0.00_N7.0.txt",
         "../webgui/airfoil_polars/clark_y_Ncrit=7/CLARK Y AIRFOIL_T1_Re0.020_M0.00_N7.0.txt",
@@ -142,6 +310,8 @@ int main() {
     double grid_max_uinf = 0.0, grid_max_rpm = 0.0;
     int npoints = 0;
     int nfailed = 0;
+    static Row rows[NPOINTS];
+    int nrows = 0;
     double bench_start = now_seconds();
 
     for (int k=0; k<NRPM; ++k) {
@@ -173,6 +343,11 @@ int main() {
             }
             if (!converged) {
                 printf("    %6.1f  %7s  %10s  %10s  %8s  %8s  %8s\n", Uinf, "-", "no conv.", "-", "-", "-", "-");
+                Row* row = &rows[nrows++];
+                memset(row, 0, sizeof *row);
+                row->rpm = rpm;
+                row->uinf = Uinf;
+                row->converged = 0;
                 ++nfailed;
                 continue;
             }
@@ -201,6 +376,11 @@ int main() {
             }
             if (!converged) {
                 printf("    %6.1f  %7s  %10s  %10s  %8s  %8s  %8s\n", Uinf, "-", "no conv.", "-", "-", "-", "-");
+                Row* row = &rows[nrows++];
+                memset(row, 0, sizeof *row);
+                row->rpm = rpm;
+                row->uinf = Uinf;
+                row->converged = 0;
                 ++nfailed;
                 continue;
             }
@@ -208,6 +388,17 @@ int main() {
 
             printf("    %6.1f  %7.3f  %10.4f  %10.6f  %8.4f  %8.4f  %8.4f\n",
                    Uinf, J, T, Q, tmin*1e3, tmean*1e3, tmax*1e3);
+
+            Row* row = &rows[nrows++];
+            row->rpm = rpm;
+            row->uinf = Uinf;
+            row->J = J;
+            row->T = T;
+            row->Q = Q;
+            row->tmin = tmin;
+            row->tmean = tmean;
+            row->tmax = tmax;
+            row->converged = 1;
 
             if (tmin < grid_min) {
                 grid_min = tmin;
@@ -237,6 +428,24 @@ int main() {
     printf("    benchmark ran in %.2f s\n", bench_time);
     //referenced so that the accumulator is not optimized away
     printf("    (checksum: %.6e)\n", sink);
+
+    //---- write this run out, and diff it against a baseline if one exists ----
+    char csv[256];
+    snprintf(csv, sizeof csv, "07_performance_%s.csv", tag);
+    write_csv(csv, rows, nrows);
+    printf("\n    wrote %s\n", csv);
+
+    if (strcmp(tag, "before") == 0) {
+        printf("    (this run is the baseline)\n");
+    } else {
+        static Row base[NPOINTS];
+        int nbase = read_csv("07_performance_before.csv", base, NPOINTS);
+        if (nbase > 0) {
+            compare(rows, nrows, base, nbase, "07_performance_before.csv");
+        } else {
+            printf("    (no 07_performance_before.csv found; run with tag 'before' first)\n");
+        }
+    }
 
     free_rotor(hqprop_5137);
     free_airfoil(clark_y);

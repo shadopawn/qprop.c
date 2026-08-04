@@ -1,9 +1,15 @@
 /*******************************************************************************
     qprop.c: a simple and lightweight library for propeller aerodynamic analysis
 
-    It uses the same mathematical formulation as Mark Drela's QPROP, which makes
-    it well-suited for rotors that operate at low Reynolds numbers and do not
-    feature complex 3D effects.
+    The blade-element/momentum equations are solved with the method of
+    S. Andrew Ning, "A simple solution method for the blade element momentum
+    equations with guaranteed convergence", Wind Energy 17(9), 2014: each
+    element is parameterized by its local inflow angle phi and solved as a
+    bracketed one-dimensional root find, with momentum theory switched between
+    the momentum, empirical (Buhl) and reversed-disk-flow branches. This keeps
+    the guaranteed convergence of the original Drela-style implementation while
+    also giving physically consistent solutions for turbine/windmill operation
+    and the descent windmill brake state (reversed freestream).
 
     Key characteristics:
     - Lightweight and portable: contained in a single file with no dependencies
@@ -769,66 +775,145 @@ typedef struct {
 //data structure for the residual inputs
 //INTERNAL USE ONLY
 typedef struct {
-    double Ua;
-    double Ut;
+    double Ua;          //freestream axial velocity (signed: negative in descent)
+    double Ut;          //rotational velocity Omega*r at the element
     double R;
     int B;
     Element* currentelement;
     double rho;
     double mu;
     double a;
+    int brake;          //0: momentum/empirical branch (phi > 0)
+                        //1: reversed-disk-flow branch (phi < 0, windmill brake)
 } ResidualArgs;
 
-//define the QProp residual function
-//NOTE: the implementation is an exact replica of the steps described in the QProp theory document
+//blade-element/momentum residual, parameterized by the local inflow angle phi
+//following Ning (2014), "A simple solution method for the blade element
+//momentum equations with guaranteed convergence", Wind Energy 17(9)
+//
+//The formulation is written in the propeller sign convention (Wa positive
+//downstream through the disk, thrust positive upstream), so the paper's
+//wind-turbine induction factor maps as a_paper = -a and kappa_paper = -k.
+//The residual is arranged so that no division by (1 +/- induction) appears:
+//with the momentum branch, 1/(1+a) = 1-k exactly, which keeps the residual
+//finite and smooth through the static condition (Uinf = 0, where k -> 1).
+//
+//Axial momentum branches (Ning eqs. 3, 6-9, in propeller convention):
+//  momentum          k >= -2/3 :  1/(1+a) = 1 - k
+//  empirical (Buhl)  k <  -2/3 :  a = -a_wt,  a_wt = (g1 - sqrt(g2))/g3
+//  reversed flow     brake = 1 :  1/(1+a) = 1 + k     (CT sign flipped)
+//Tangential (Ning eqs. 10-11): 1/(1-a') = 1 + iota (momentum), 1 - iota (brake)
 //INTERNAL USE ONLY
-void residual(ResidualOutput* output, double psi, ResidualArgs* args) {
+void residual(ResidualOutput* output, double phi, ResidualArgs* args) {
     //extract args
-    double Ua = args->Ua;
+    double U = args->Ua;
     double Ut = args->Ut;
     double R = args->R;
     int B = args->B;
     Element* currentelement = args->currentelement;
-    /*printf("  size = %i\n", currentelement->airfoil->size);
-    for (int i=0; i<currentelement->airfoil->size; ++i) {
-        printf("Re[%i] = %f\n", i, currentelement->airfoil->polars[i]->Re);
-    }*/
     double rho = args->rho;
     double mu = args->mu;
-    double a = args->a;
+    double a_ref = args->a;
 
-    //calculate velocity components
-    double U = sqrt(Ua*Ua + Ut*Ut);
-    double Wa = 0.5*Ua + 0.5*U*sin(psi);
-    double Wt = 0.5*Ut + 0.5*U*cos(psi);
-    output->va = Wa - Ua;
-    output->vt = Ut - Wt;
+    double sinphi = sin(phi);
+    double cosphi = cos(phi);
+    if (fabs(cosphi) < 1e-12) {
+        cosphi = (cosphi >= 0.0)? 1e-12 : -1e-12;
+    }
 
-    //determine relative wind velocity and angle of attack
-    output->W = sqrt(Wa*Wa + Wt*Wt);
-    double Re = rho * output->W * (currentelement->c) / mu;
-    output->phi = atan(Wa/Wt);
-    double alpha = currentelement->beta - output->phi;
-
-    //interpolate airfoil aerodynamic coefficients
-    double Mach = (a > 0) ? output->W/a : 0.0;
+    //angle of attack and airfoil coefficients
+    //Re and Mach use the no-induction velocity scale sqrt(U^2 + (Omega*r)^2):
+    //the exact W depends on the induction this residual is solving for, and
+    //the polar interpolation across Re is a weak dependence
+    double W0 = sqrt(U*U + Ut*Ut);
+    double alpha = currentelement->beta - phi;
+    double Re = rho * W0 * (currentelement->c) / mu;
+    double Mach = (a_ref > 0)? W0/a_ref : 0.0;
     PolarPoint operatingpoint = {0.0, 0.0, 0.0};
     interpolate_airfoil_polars(&operatingpoint, currentelement->airfoil, alpha, Re, Mach);
 
-    //calculate tip losses
-    output->lambdaw = ((currentelement->r)/R)*(Wa/Wt);
-    double f = (1.0 - (currentelement->r)/R) * 0.5 * B / output->lambdaw;
-    //double F = acos(exp(-f)) * 2.0 / PI;
-    double F = 0.0;
-    if (f>0) {
-        F = acos(exp(-f)) * 2.0 / PI;
+    //force coefficients normal and tangential to the rotor plane
+    double cn = operatingpoint.CL*cosphi - operatingpoint.CD*sinphi;
+    double ct = operatingpoint.CL*sinphi + operatingpoint.CD*cosphi;
+
+    //Prandtl tip loss; |sin phi| keeps F defined for reversed inflow (phi < 0),
+    //which replaces the old F = 0 guard on the wake advance ratio
+    double sinphi_abs = fabs(sinphi);
+    double F = 1.0;
+    if (sinphi_abs > 1e-9) {
+        double ftip = 0.5*B*(R - currentelement->r)/((currentelement->r)*sinphi_abs);
+        if (ftip < 0.0) {
+            ftip = 0.0;
+        }
+        F = acos(exp(-ftip)) * 2.0 / PI;
+    }
+    if (F < 1e-9) {
+        F = 1e-9;       //keeps k and iota finite at the very tip
     }
 
-    //determine circulation and rotor coefficients
-    output->Gamma = output->vt * (4.0*PI*(currentelement->r) / B) * F * sqrt(1.0 + pow(4*output->lambdaw*R/(PI*B*(currentelement->r)), 2));
-    output->residual = output->Gamma - 0.5 * output->W * (currentelement->c) * operatingpoint.CL;
-    output->Cn = operatingpoint.CL* Wt / output->W - operatingpoint.CD * Wa / output->W;
-    output->Ct = operatingpoint.CL* Wa / output->W + operatingpoint.CD * Wt / output->W;
+    //local solidity and the nondimensional loading parameters (Ning eqs. 4, 11)
+    double sigma = B*(currentelement->c) / (2.0*PI*(currentelement->r));
+    double s2 = (sinphi_abs > 1e-9)? sinphi*sinphi : 1e-18;
+    double sc = sinphi*cosphi;
+    if (fabs(sc) < 1e-12) {
+        sc = (sc >= 0.0)? 1e-12 : -1e-12;
+    }
+    double k = sigma*cn / (4.0*F*s2);
+    double iota = sigma*ct / (4.0*F*sc);
+
+    //axial and tangential momentum branches
+    double inv1pa;      // 1/(1+a)
+    double inv1ma;      // 1/(1-a')
+    if (args->brake) {
+        //reversed disk flow (phi < 0): the windmill brake state, where the
+        //momentum thrust changes sign, CT = 4a(a-1)F in wind-turbine terms
+        inv1pa = 1.0 + k;
+        inv1ma = 1.0 - iota;
+    }
+    else if (-k <= 2.0/3.0) {
+        //momentum region; includes the normal propeller state (k > 0),
+        //the static condition (k = 1) and light turbine loading (k < 0)
+        inv1pa = 1.0 - k;
+        inv1ma = 1.0 + iota;
+    }
+    else {
+        //heavily loaded turbine (a_wt > 0.4): Buhl's empirical correction,
+        //C1-continuous with the momentum branch at a_wt = 0.4
+        double kwt = -k;
+        double g1 = 2.0*F*kwt - (10.0/9.0 - F);
+        double g2 = 2.0*F*kwt - F*(4.0/3.0 - F);
+        double g3 = 2.0*F*kwt - (25.0/9.0 - 2.0*F);
+        if (fabs(g3) < 1e-9) {
+            g3 = (g3 >= 0.0)? 1e-9 : -1e-9;     //Ning's point singularity: numerator is also 0 here
+        }
+        if (g2 < 0.0) {
+            g2 = 0.0;
+        }
+        double awt = (g1 - sqrt(g2))/g3;
+        if (awt > 0.999999) {
+            awt = 0.999999;
+        }
+        inv1pa = 1.0/(1.0 - awt);
+        inv1ma = 1.0 + iota;
+    }
+
+    //the residual: tan(phi) = U(1+a) / (Omega*r*(1-a')), rearranged so the
+    //singularities sit on the bracket boundaries (Ning eq. 13 / eq. 46)
+    output->residual = sinphi*inv1pa - (U/Ut)*cosphi*inv1ma;
+
+    //flow state at this phi (exact at the converged root)
+    double clamped_inv1ma = (fabs(inv1ma) > 1e-9)? inv1ma : ((inv1ma >= 0.0)? 1e-9 : -1e-9);
+    double Wt = Ut/clamped_inv1ma;      // = Omega*r*(1-a')
+    double W = Wt/cosphi;
+    double Wa = W*sinphi;
+    output->W = W;
+    output->phi = phi;
+    output->va = Wa - U;
+    output->vt = Ut - Wt;
+    output->lambdaw = ((currentelement->r)/R)*(Wa/Wt);
+    output->Gamma = 0.5*W*(currentelement->c)*operatingpoint.CL;
+    output->Cn = cn;
+    output->Ct = ct;
 }
 
 //wrap residual function so it can be passed to bisection/brent
@@ -963,6 +1048,43 @@ double brent(double (*f)(double x, void* args), double a, double b, double tol, 
     return b;
 }
 
+//find a root of the BEM residual inside [lo, hi]
+//returns 1 and writes phi on success, 0 when the interval contains no root;
+//the endpoints are checked first, then a coarse scan catches interior
+//sign-change pairs that leave the endpoint signs equal
+//INTERNAL USE ONLY
+int solve_bracket(double* phi, double lo, double hi, double tol, int itmax, ResidualArgs* args) {
+    double flo = residual_wrapper(lo, args);
+    double fhi = residual_wrapper(hi, args);
+    if (flo == 0.0) {
+        *phi = lo;
+        return 1;
+    }
+    if (fhi == 0.0) {
+        *phi = hi;
+        return 1;
+    }
+    if (flo*fhi < 0.0) {
+        *phi = brent(residual_wrapper, lo, hi, tol, itmax, args);
+        return 1;
+    }
+
+    //no sign change at the endpoints: scan for an interior one
+    const int nscan = 64;
+    double prev = flo;
+    for (int i=1; i<=nscan; ++i) {
+        double x = lo + (hi-lo)*i/(double)nscan;
+        double fx = residual_wrapper(x, args);
+        if (prev*fx <= 0.0) {
+            double xprev = lo + (hi-lo)*(i-1)/(double)nscan;
+            *phi = brent(residual_wrapper, xprev, x, tol, itmax, args);
+            return 1;
+        }
+        prev = fx;
+    }
+    return 0;
+}
+
 //run qprop iterations
 RotorPerformance* qprop(Rotor* rotor, double Uinf, double Omega, double tol, int itmax, double rho, double mu, double a) {
     //initialize variables
@@ -1009,16 +1131,29 @@ RotorPerformance* qprop(Rotor* rotor, double Uinf, double Omega, double tol, int
             }
         }
         
-        //find the value of psi that makes the residual function equal to zero
-        ResidualArgs args = {Uinf, Omega*currentelement.r, rotor->D/2, rotor->B, &currentelement, rho, mu, a};
-        double psi = brent(residual_wrapper, -PI/2, +PI/2, tol, itmax, &args);
-        //double psi = bisection(residual_wrapper, -PI/2, +PI/2, tol, itmax, &args);
+        //find the inflow angle phi that zeroes the BEM residual (Ning 2014)
+        ResidualArgs args = {Uinf, Omega*currentelement.r, rotor->D/2, rotor->B, &currentelement, rho, mu, a, 0};
+        const double phi_eps = 1e-6;
+        double phi = 0.0;
+        int solved = 0;
+        if (Uinf < 0.0) {
+            //reversed freestream (descent): prefer the reversed-disk-flow
+            //branch (phi < 0), which carries the windmill brake state; when it
+            //has no root (slow descent / vortex ring band, where no steady
+            //streamtube solution exists) fall back to the momentum branch
+            args.brake = 1;
+            solved = solve_bracket(&phi, -PI/2 + phi_eps, -phi_eps, tol, itmax, &args);
+        }
+        if (!solved) {
+            args.brake = 0;
+            solved = solve_bracket(&phi, phi_eps, PI/2, tol, itmax, &args);
+        }
 
         //calculate element thrust and torque
         ResidualOutput res;     //= {0.0, 0.0, 0.0, 0, NULL, 0.0, 0.0, 0.0}
-        residual(&res, psi, &args);
-        if (fabs(res.residual) > tol) {
-            printf("ERROR while using qprop at blade location #%i: unable to find psi value that is zeroing the residual function (residual=%e exceeds tolerance=%e)\n", i, perf->residuals[i], tol);
+        residual(&res, phi, &args);
+        if (!solved || fabs(res.residual) > tol) {
+            printf("ERROR while using qprop at blade location #%i: unable to find phi value that is zeroing the residual function (residual=%e exceeds tolerance=%e)\n", i, res.residual, tol);
             free_rotor_performance(perf);
             return NULL;
         }

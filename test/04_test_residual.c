@@ -67,14 +67,18 @@ int main() {
         &tipelement,
         1.225,
         1.81e-5,
-        0.0
+        0.0,
+        0                           //momentum/empirical branch
     };
     ResidualOutput residual2;
     residual(&residual2, deg2rad(+45.0), &args2);
-    //printf("%f\n", residual2.residual);
+    //printf("%.16g\n", residual2.residual);
     //printf("%f\n", residual2.W);
     //printf("%f\n", residual2.phi);
-    if (fabs(residual2.residual) - 0.8024823651874253 <= 1e-6) {
+    //NOTE: expected value regenerated when the solver moved to the Ning (2014)
+    //inflow-angle residual; the pre-Ning (Drela psi-parameterization) value at
+    //this point was 0.8024823651874253 (see the Julia output below)
+    if (fabs(residual2.residual - 0.7413821392935108) <= 1e-6) {
         printf("TEST 4.2 - PASSED :)\n");
     }
     else {
@@ -83,7 +87,7 @@ int main() {
         free_airfoil(naca4412);
         return 0;
     }
-    //Julia output:
+    //Julia output (pre-Ning formulation):
     //  julia> qprop_residual(deg2rad(+45.0), 0.01, 6014*pi/30, 1.225, 1.81e-5, apc10x7sf, nelems)
     //      res = 0.8024823651874253,
     //      Cn = -0.35011489731684264,
