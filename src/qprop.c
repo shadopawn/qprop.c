@@ -1244,22 +1244,26 @@ int solve_bracket(double* phi, double lo, double hi, double tol, int itmax, Resi
 //refine a root from a nearby starting guess with the secant method
 //returns 1 and writes phi on success, 0 when the caller should bracket instead
 //
-//The iterate is held inside the half of the phi domain the seed came from,
-//because the two halves are different flow states and crossing between them
-//mid-iteration is meaningless. Anything that leaves the domain, changes sign or
-//stalls hands back to the bracketed solve, so a failure here costs a little
+//The search is confined to [lo, hi], which the caller sets to the same interval
+//the bracketed solve would have used for that half of the phi domain. That
+//matters: the two halves are different flow states, and in the negative half
+//the interval stops at point M, because the sliver between M and 0 holds only
+//the spurious zero-thrust root described on point_M(). Without that bound a
+//seed near hover converges straight onto it. Anything that leaves the interval
+//or stalls hands back to the bracketed solve, so a failure here costs a little
 //time but never accuracy.
 //INTERNAL USE ONLY
-int solve_secant(double* phi, double seed, double tol, int itmax, ResidualArgs* args) {
-    const double phi_eps = 1e-6;
-    if (!(seed > -PI/2 && seed < PI/2) || fabs(seed) < phi_eps) {
+int solve_secant(double* phi, double seed, double lo, double hi, double tol, int itmax, ResidualArgs* args) {
+    if (!(hi > lo) || !(seed > lo) || !(seed < hi)) {
         return 0;
     }
-    double side = (seed > 0.0)? 1.0 : -1.0;
-    double step = (seed > 0.0)? 1e-4 : -1e-4;
+    double step = 1e-4*(hi - lo);
+    if (!(seed + step < hi)) {
+        step = -step;               //step inward from the far end
+    }
     double x0 = seed;
     double x1 = seed + step;
-    if (!(x1 > -PI/2 && x1 < PI/2)) {
+    if (!(x1 > lo) || !(x1 < hi)) {
         return 0;
     }
     double f0 = residual_wrapper(x0, args);
@@ -1276,7 +1280,7 @@ int solve_secant(double* phi, double seed, double tol, int itmax, ResidualArgs* 
             return 0;
         }
         double x2 = x1 - f1*(x1 - x0)/den;
-        if (!(x2 > -PI/2 && x2 < PI/2) || x2*side <= 0.0) {
+        if (!(x2 > lo) || !(x2 < hi)) {
             return 0;
         }
         x0 = x1;
@@ -1402,17 +1406,31 @@ RotorPerformance* qprop(Rotor* rotor, double Uinf, double Omega, double tol, int
         //return a zero-thrust solution instead of the physical one.
         //Which momentum branch applies is decided by kappa inside residual(),
         //not by which bracket is being searched.
+        //Point M bounds the negative half-plane; it is needed by both the warm
+        //and the cold path there, so compute it once per element.
+        double M = 0.0;
+        int haveM = (Uinf < 0.0) && point_M(&args, &M) && (M < -phi_eps);
+
+        //Each half of the phi domain is tried in the same order whether or not
+        //the solve is warm, so that seeding changes how a root is found and not
+        //which one: the negative half first where point M says it can hold one,
+        //then the positive half. Within a half the secant is seeded from the
+        //previous solve when the seed lives there, and bracketing takes over
+        //whenever it does not converge - so accuracy never depends on the seed,
+        //only speed does.
         int solved = 0;
-        if (warm) {
-            //seed from the previous solve; falls through to bracketing if the
-            //secant does not converge, so accuracy never depends on the seed
-            solved = solve_secant(&phi, state->phi[i], tol, itmax, &args);
-        }
-        if (!solved && Uinf < 0.0) {
-            double M = 0.0;
-            if (point_M(&args, &M) && M < -phi_eps) {
+        double seed = warm? state->phi[i] : 0.0;
+
+        if (haveM) {
+            if (warm && seed < 0.0) {
+                solved = solve_secant(&phi, seed, -PI/2 + phi_eps, M, tol, itmax, &args);
+            }
+            if (!solved) {
                 solved = solve_bracket(&phi, -PI/2 + phi_eps, M, tol, itmax, &args);
             }
+        }
+        if (!solved && warm && seed > 0.0) {
+            solved = solve_secant(&phi, seed, phi_eps, PI/2, tol, itmax, &args);
         }
         if (!solved) {
             solved = solve_bracket(&phi, phi_eps, PI/2, tol, itmax, &args);
