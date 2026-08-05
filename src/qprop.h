@@ -73,7 +73,7 @@ typedef struct {
 //1000 Hz on a quadcopter trajectory it cuts the solve from about 23 residual
 //evaluations per element to about 4, a little over five times faster.
 //
-//A rotor has no state until prop_state_new() is called on it, so warm starting
+//A rotor has no state until add_warm_start_prop_state() is called on it, so warm starting
 //is opt-in and the default solve stays stateless and reproducible.
 //
 //With a state attached the solver becomes path dependent: near a bifurcation,
@@ -95,7 +95,7 @@ typedef struct {
     int nsections;      //number of sections discretizing a blade
     Section* sections;  //array of sections discretizing a blade
     //Warm-start state, owned by the rotor and freed with it. NULL unless
-    //prop_state_new() has been called, in which case qprop() seeds each
+    //add_warm_start_prop_state() has been called, in which case qprop() seeds each
     //element from the previous solve. Appended so that the offsets of the
     //fields above are unchanged.
     PropState* state;
@@ -264,12 +264,12 @@ Rotor* refine_rotor_sections(Rotor* oldrotor, int nsections);
 //Notes:
 //  - the current implementation assumes that there is no externally-induced
 //    tangential velocity (Ut = 0)
-//  - when rotor->state is set (see prop_state_new) each element is seeded from
+//  - when rotor->state is set (see add_warm_start_prop_state) each element is seeded from
 //    the previous solve and the state is updated in place on the rotor;
 //    otherwise the solve is stateless
 RotorPerformance* qprop(Rotor* rotor, double Uinf, double Omega, double tol, int itmax, double rho, double mu, double a);
 
-//PROP_STATE_NEW attaches a warm-start state to a rotor, enabling warm starting
+//add_warm_start_prop_state attaches a warm-start state to a rotor, enabling warm starting
 //Input:
 //  - rotor (Rotor*): the rotor to attach the state to
 //Output:
@@ -281,17 +281,17 @@ RotorPerformance* qprop(Rotor* rotor, double Uinf, double Omega, double tol, int
 //  - the rotor owns the state and free_rotor() releases it, so there is no
 //    need to free it separately; calling this twice is harmless
 //  - one state per rotor instance: give each propeller its own Rotor
-PropState* prop_state_new(Rotor* rotor);
+PropState* add_warm_start_prop_state(Rotor* rotor);
 
-//PROP_STATE_FREE releases a rotor's warm-start state and returns it to
+//free_prop_state releases a rotor's warm-start state and returns it to
 //stateless solving
 //Input:
 //  - rotor (Rotor*): the rotor whose state should be released
 //Output:
 //  - none
-void prop_state_free(Rotor* rotor);
+void free_prop_state(Rotor* rotor);
 
-//PROP_STATE_RESET discards the stored inflow angles without freeing the state,
+//reset_prop_state discards the stored inflow angles without freeing the state,
 //so the next solve starts cold and later ones warm again
 //Input:
 //  - rotor (Rotor*): the rotor whose state should be invalidated
@@ -300,5 +300,5 @@ void prop_state_free(Rotor* rotor);
 //Notes:
 //  - use after a discontinuity (a propeller stopping, a teleport) where the
 //    previous angles are no longer a useful guess
-void prop_state_reset(Rotor* rotor);
+void reset_prop_state(Rotor* rotor);
 

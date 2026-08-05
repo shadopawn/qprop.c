@@ -584,7 +584,7 @@ Rotor* import_rotor_geometry_apc(const char *filename, Airfoil* airfoil) {
     newrotor->B = 0;
     newrotor->nsections = 0;
     newrotor->sections = NULL;
-    newrotor->state = NULL;      //warm starting is opt-in, see prop_state_new()
+    newrotor->state = NULL;      //warm starting is opt-in, see add_warm_start_prop_state()
 
     FILE* fileio = fopen(filename, "rb");
     if (!fileio) {
@@ -701,7 +701,7 @@ Rotor* import_rotor_geometry_uiuc(const char *filename, Airfoil* airfoil, double
     newrotor->B = B;
     newrotor->nsections = 0;
     newrotor->sections = NULL;
-    newrotor->state = NULL;      //warm starting is opt-in, see prop_state_new()
+    newrotor->state = NULL;      //warm starting is opt-in, see add_warm_start_prop_state()
 
     FILE* fileio = fopen(filename, "rb");
     if (!fileio) {
@@ -851,7 +851,7 @@ Rotor* refine_rotor_sections(Rotor* oldrotor, int nsections) {
 
 //free allocated memory on a Rotor
 void free_rotor(Rotor* currentrotor) {
-    prop_state_free(currentrotor);      //the rotor owns its warm-start state
+    free_prop_state(currentrotor);      //the rotor owns its warm-start state
     free(currentrotor->sections);
     currentrotor->sections = NULL;
     free(currentrotor);
@@ -1296,7 +1296,7 @@ int solve_secant(double* phi, double seed, double lo, double hi, double tol, int
 }
 
 //release a rotor's warm-start state and return it to stateless solving
-void prop_state_free(Rotor* rotor) {
+void free_prop_state(Rotor* rotor) {
     if (!rotor || !rotor->state) {
         return;
     }
@@ -1309,25 +1309,25 @@ void prop_state_free(Rotor* rotor) {
 }
 
 //attach a warm-start state to a rotor, enabling warm starting on later solves
-PropState* prop_state_new(Rotor* rotor) {
+PropState* add_warm_start_prop_state(Rotor* rotor) {
     if (!rotor || rotor->nsections < 2) {
         return NULL;
     }
     if (rotor->state && rotor->state->nelems == rotor->nsections - 1) {
         return rotor->state;        //already attached, and the right size
     }
-    prop_state_free(rotor);         //wrong size: rebuild it
+    free_prop_state(rotor);         //wrong size: rebuild it
 
     PropState* state = calloc(1, sizeof(PropState));
     if (!state) {
-        printf("ERROR: memory allocation error in prop_state_new()\n");
+        printf("ERROR: memory allocation error in add_warm_start_prop_state()\n");
         return NULL;
     }
     state->nelems = rotor->nsections - 1;
     state->phi = calloc(state->nelems, sizeof(double));
     state->valid = 0;
     if (!state->phi) {
-        printf("ERROR: memory allocation error in prop_state_new()\n");
+        printf("ERROR: memory allocation error in add_warm_start_prop_state()\n");
         free(state);
         return NULL;
     }
@@ -1336,7 +1336,7 @@ PropState* prop_state_new(Rotor* rotor) {
 }
 
 //discard the stored inflow angles so that the next solve starts cold
-void prop_state_reset(Rotor* rotor) {
+void reset_prop_state(Rotor* rotor) {
     if (rotor && rotor->state) {
         rotor->state->valid = 0;
     }

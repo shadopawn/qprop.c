@@ -172,7 +172,7 @@ int main(int argc, char** argv) {
         }
 
         //---- stateless ----
-        prop_state_free(rotor);
+        free_prop_state(rotor);
         int failc = 0;
         double best_cold = 1e300;
         for (int rep = 0; rep < REPEATS; ++rep) {
@@ -189,11 +189,11 @@ int main(int argc, char** argv) {
         }
 
         //---- warm ----
-        prop_state_new(rotor);
+        add_warm_start_prop_state(rotor);
         int failw = 0;
         double best_warm = 1e300;
         for (int rep = 0; rep < REPEATS; ++rep) {
-            prop_state_reset(rotor);        //every replay starts from cold
+            reset_prop_state(rotor);        //every replay starts from cold
             double t0 = now_seconds();
             for (int f = 0; f < n; ++f) {
                 RotorPerformance* p = qprop(rotor, uinf[f], rpm[f]*PI/30.0, tol, itmax, rho, mu, a);
@@ -205,7 +205,7 @@ int main(int argc, char** argv) {
             double dt = (now_seconds() - t0)/n;
             if (dt < best_warm) { best_warm = dt; }
         }
-        prop_state_free(rotor);
+        free_prop_state(rotor);
 
         //---- agreement ----
         double worst = 0.0;
