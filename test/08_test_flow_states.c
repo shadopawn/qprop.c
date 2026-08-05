@@ -59,6 +59,12 @@
 //loading is only caught by sweeping several.
 static const double SWEEP_RPMS[NRPM] = {5000.0, 10000.0, 20000.0, 30000.0, 40000.0};
 
+//The harness characterises the descent regimes, so it runs with the vortex
+//ring correction at full strength. A real caller sets this from the edgewise
+//velocity (see qprop_vrs in qprop.h); set it to 0 here to sweep the same grid
+//against pure momentum theory and diff the two CSVs.
+#define SWEEP_VRS   1.0
+
 //tolerances
 //The smoothness check looks for a discontinuity, which is a jump in T between
 //adjacent sweep points far larger than the curve's own slope explains. It has
@@ -138,7 +144,7 @@ static void solve_point(Pt* p, Rotor* rot, double Uinf, double Omega,
 
         //mirror the bracketing inside qprop(): the negative half-plane first
         //where point M says it can hold a root, then the positive half
-        ResidualArgs args = {Uinf, Omega*el.r, R, B, &el, rho, mu, a_sound};
+        ResidualArgs args = {Uinf, Omega*el.r, R, B, &el, rho, mu, a_sound, SWEEP_VRS};
         const double phi_eps = 1e-6;
         double phi = 0.0;
         int ok = 0;
@@ -526,7 +532,7 @@ int main(int argc, char** argv) {
     printf("  %8s %9s %9s  %-15s %8s  %-22s\n",
            "rpm", "T static", "J(T=0)", "streamtube adm.", "worst", "largest dT step");
     printf("  %8s %9s %9s  %-15s %8s  %-22s\n",
-           "", "(N)", "", "", "mom", "(% of thrust span)");
+           "", "(N)", "", "", "vs mom", "(% of thrust span)");
     printf("  -------------------------------------------------------------------------------------\n");
     int total_adm = 0, total_smooth_bad = 0;
     double adm_bad_lo = 0.0, adm_bad_hi = 0.0;     //V/v_h band the violations occupy
@@ -586,7 +592,7 @@ int main(int argc, char** argv) {
     }
 
     printf("\n  pooled over all rpm, by region:\n");
-    printf("  %-13s %6s   %-26s %s\n", "region", "points", "streamtube admissible", "momentum closure");
+    printf("  %-13s %6s   %-26s %s\n", "region", "points", "streamtube admissible", "departure from momentum");
     printf("  ---------------------------------------------------------------------------\n");
     for (int j = 0; j < 4; ++j) {
         if (!cnt[j]) { continue; }
@@ -599,8 +605,13 @@ int main(int argc, char** argv) {
     printf("\n  streamtube admissibility is asserted only below V/v_h = -2, where the\n");
     printf("  windmill brake branch applies and sign(Wa) must equal sign(Uinf). In slow\n");
     printf("  descent Wa > 0 is correct, and inside the vortex ring band nothing can be\n");
-    printf("  asserted. Momentum closure is reported, not asserted, and is scaled by each\n");
-    printf("  rpm's own static thrust so the low-rpm curves are judged on their own terms.\n");
+    printf("  asserted.\n");
+    printf("\n  the last column is |T_blade_element - T_annulus_momentum|, scaled by each\n");
+    printf("  rpm's own static thrust. It is reported, never asserted. Outside the vortex\n");
+    printf("  ring band it should be near zero, and is. Inside it the solver deliberately\n");
+    printf("  uses an empirical descent curve in place of momentum theory, so a large\n");
+    printf("  value there is the correction working rather than a closure failure; it is\n");
+    printf("  the size of the departure, not an error.\n");
     if (adm_bad_seen) {
         printf("\n  the %d violations all sit in V/v_h = %.2f..%.2f, just past the assertion\n",
                total_adm, adm_bad_lo, adm_bad_hi);
@@ -629,7 +640,7 @@ int main(int argc, char** argv) {
     int regr_bad = 0;
     for (int r = 0; r < NRPM; ++r) {
         for (int k = 0; k < 2; ++k) {
-            RotorPerformance* perf = qprop(rot, regr_u[k], SWEEP_RPMS[r]*PI/30.0, tol, itmax, rho, mu, a_sound);
+            RotorPerformance* perf = qprop_vrs(rot, regr_u[k], SWEEP_RPMS[r]*PI/30.0, SWEEP_VRS, tol, itmax, rho, mu, a_sound);
             if (!perf) {
                 printf("  %8.0f %+7.1f   qprop() returned NULL  <-- FAIL\n", SWEEP_RPMS[r], regr_u[k]);
                 ++regr_bad;

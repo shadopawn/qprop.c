@@ -893,7 +893,97 @@ typedef struct {
     double rho;
     double mu;
     double a;
+    //Strength of the vortex ring correction, 0 to 1. See qprop_vrs(). Zero
+    //leaves the closure as pure momentum theory, which is what the library
+    //does unless the caller asks otherwise: this is an axial-flow solver, so
+    //it cannot see the edgewise velocity that decides whether a descending
+    //rotor is actually in the vortex ring state.
+    double vrs;
 } ResidualArgs;
+
+//Vortex ring state, expressed in the same variables as the other branches.
+//
+//Write the normalised descent rate and induced velocity as x = Uinf/v_h and
+//y = v/v_h. The annulus hover induced velocity is v_h = |Wa|*sqrt(k), where k
+//is the loading parameter the residual already forms, so
+//
+//    x + y(x) = 1/sqrt(k)        and        1/(1+a) = x*sqrt(k)
+//
+//Momentum theory is simply y = sqrt(k) in these terms, which recovers
+//1/(1+a) = 1 - k exactly, i.e. the momentum branch below. So the vortex ring
+//correction is that same closure with y replaced by a curve measured in
+//descent, and it stays a pure function of the local loading - never of the
+//geometric velocity triangle, which is only meaningful at the converged root.
+//
+//The curve is the Castles & Gray fit (NACA TN 2474); see Johnson,
+//NASA/TP-2005-213477 for its use in flight dynamics work. It bridges the gap
+//where neither momentum branch is valid, meeting both of them at v/v_h = 1 at
+//the ends (x = 0 and x = -2), and peaking at v/v_h = 2.06 near x = -1.45. That
+//peak is the defining feature of the state: the same thrust costs about twice
+//the induced velocity, hence about twice the induced power.
+//
+//This is a mean-flow model. The thrust fluctuation and roughness of a real
+//vortex ring state are not represented, and the curve was fitted to full-scale
+//rotor data rather than to small propellers.
+//INTERNAL USE ONLY
+static double vrs_g(double x) {         // x + y(x)
+    return 0.974 - x*(0.125 + x*(1.372 + x*(1.718 + x*0.655)));
+}
+static double vrs_dg(double x) {
+    return -0.125 - x*(2.744 + x*(5.154 + x*2.620));
+}
+
+//g is monotone between these two points; outside them the correction is off.
+//The upper end stops short of x = 0 because g turns over at x = -0.05, and the
+//lower end stops short of x = -1.767 where the curve puts Wa = 0. That zero is
+//real physics - the flow through the disk reverses on the way to the windmill
+//brake state - but it is also where sign(sin phi) flips, so it belongs to the
+//other half-plane bracket, which the solver already searches separately.
+#define VRS_XLO (-1.70)
+#define VRS_XHI (-0.10)
+#define VRS_GLO 0.19132416
+#define VRS_GHI 0.97443250
+
+//Invert g(x) = 1/sqrt(k). A fixed iteration count from a smooth seed keeps the
+//result a smooth function of the loading, which matters far more here than the
+//last digit: the curve being inverted is itself only good to about ten percent.
+//INTERNAL USE ONLY
+static double vrs_invert(double G) {
+    double x = VRS_XLO + (VRS_XHI - VRS_XLO)*(G - VRS_GLO)/(VRS_GHI - VRS_GLO);
+    for (int i = 0; i < 5; ++i) {
+        double d = vrs_dg(x);
+        if (fabs(d) < 1e-9) {
+            break;
+        }
+        x -= (vrs_g(x) - G)/d;
+        if (x < VRS_XLO) { x = VRS_XLO; }
+        if (x > VRS_XHI) { x = VRS_XHI; }
+    }
+    return x;
+}
+
+//Blend weight, zero outside the band and one across the middle, so that the
+//correction hands back to the momentum branch continuously at both ends. The
+//peak of the effect, at x = -1.45, sits inside the full-strength stretch.
+//INTERNAL USE ONLY
+static double vrs_window(double x) {
+    const double off_lo = -1.70, full_lo = -1.60;
+    const double full_hi = -0.20, off_hi = -0.10;
+    double u;
+    if (x <= off_lo || x >= off_hi) {
+        return 0.0;
+    }
+    if (x < full_lo) {
+        u = (x - off_lo)/(full_lo - off_lo);
+    }
+    else if (x > full_hi) {
+        u = (x - off_hi)/(full_hi - off_hi);
+    }
+    else {
+        return 1.0;
+    }
+    return u*u*(3.0 - 2.0*u);
+}
 
 //blade-element/momentum residual, parameterized by the local inflow angle phi
 //following Ning (2014), "A simple solution method for the blade element
@@ -1018,6 +1108,24 @@ void residual(ResidualOutput* output, double phi, ResidualArgs* args) {
             awt = 0.999999;
         }
         inv1pa = 1.0/(1.0 - awt);
+    }
+
+    //Vortex ring state, replacing the momentum branch inside the band where it
+    //is invalid. See the derivation above vrs_g(). The state only exists when
+    //the rotor is descending (U < 0) while still driving flow down through the
+    //disk (sin phi > 0) under positive thrust (cn > 0, hence k > 0); outside
+    //that the standard branches already apply.
+    //The caller scales the whole correction through args->vrs; at zero the
+    //branch costs one predictable compare and the closure is pure momentum.
+    if (args->vrs > 0.0 && U < 0.0 && s > 0.0 && k > 0.0) {
+        double G = 1.0/sqrt(k);             // = x + y(x)
+        if (G > VRS_GLO && G < VRS_GHI) {
+            double x = vrs_invert(G);
+            double w = vrs_window(x)*(args->vrs);
+            if (w > 0.0) {
+                inv1pa = (1.0 - w)*inv1pa + w*(x/G);    // x*sqrt(k)
+            }
+        }
     }
 
     //the residual: tan(phi) = U(1+a) / (Omega*r*(1-a')), rearranged so the
@@ -1342,10 +1450,19 @@ void prop_state_reset(Rotor* rotor) {
     }
 }
 
+//run qprop iterations with pure momentum theory in the descent branches
+RotorPerformance* qprop(Rotor* rotor, double Uinf, double Omega, double tol, int itmax, double rho, double mu, double a) {
+    return qprop_vrs(rotor, Uinf, Omega, 0.0, tol, itmax, rho, mu, a);
+}
+
 //run qprop iterations
 //each element is seeded from the previous solve when the rotor carries a
 //warm-start state, and solved from a cold bracket otherwise
-RotorPerformance* qprop(Rotor* rotor, double Uinf, double Omega, double tol, int itmax, double rho, double mu, double a) {
+RotorPerformance* qprop_vrs(Rotor* rotor, double Uinf, double Omega, double vrs_strength, double tol, int itmax, double rho, double mu, double a) {
+    //values outside [0,1] extrapolate past the measured curve and can cost the
+    //bracket its guaranteed sign change, so they are clamped rather than trusted
+    if (!(vrs_strength > 0.0)) { vrs_strength = 0.0; }      //also catches NaN
+    if (vrs_strength > 1.0)    { vrs_strength = 1.0; }
     PropState* state = rotor->state;
     //initialize variables
     RotorPerformance* perf = calloc(1, sizeof(RotorPerformance));
@@ -1395,7 +1512,7 @@ RotorPerformance* qprop(Rotor* rotor, double Uinf, double Omega, double tol, int
         }
         
         //find the inflow angle phi that zeroes the BEM residual (Ning 2014)
-        ResidualArgs args = {Uinf, Omega*currentelement.r, rotor->D/2, rotor->B, &currentelement, rho, mu, a};
+        ResidualArgs args = {Uinf, Omega*currentelement.r, rotor->D/2, rotor->B, &currentelement, rho, mu, a, vrs_strength};
         const double phi_eps = 1e-6;
         double phi = 0.0;
         //With a reversed freestream the flow through the disk may run with it,

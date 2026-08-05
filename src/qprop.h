@@ -267,7 +267,42 @@ Rotor* refine_rotor_sections(Rotor* oldrotor, int nsections);
 //  - when rotor->state is set (see prop_state_new) each element is seeded from
 //    the previous solve and the state is updated in place on the rotor;
 //    otherwise the solve is stateless
+//  - descent is solved with pure momentum theory; call qprop_vrs() to enable
+//    the vortex ring correction
 RotorPerformance* qprop(Rotor* rotor, double Uinf, double Omega, double tol, int itmax, double rho, double mu, double a);
+
+//QPROP_VRS is qprop() with the vortex ring state correction available.
+//
+//Momentum theory has no valid branch for -2 < Uinf/v_h < 0: a descending rotor
+//recirculates its own wake, so the streamtube both branches assume does not
+//exist. With vrs_strength > 0 that gap is bridged by an empirical fit to
+//measured descent data (Castles & Gray, NACA TN 2474; see Johnson,
+//NASA/TP-2005-213477). It is a mean-flow model - the thrust fluctuation and
+//roughness of a real vortex ring state are not represented - and the curve was
+//fitted to full-scale rotors rather than to small propellers.
+//
+//Input:
+//  - vrs_strength (double): 0 applies pure momentum theory and reproduces
+//    qprop() exactly; 1 applies the empirical curve in full. Values in between
+//    blend the two. Clamped to [0,1].
+//  - all other arguments as qprop()
+//Output:
+//  - (RotorPerformance*): pointer to the QProp outputs
+//Notes:
+//  - THE CALLER OWNS THE DECISION, and it is not simply "am I descending".
+//    This is an axial-flow solver: Uinf is the component along the shaft, and
+//    the library never sees the edgewise velocity that decides whether a
+//    vortex ring can form at all. Translating fast enough sweeps the wake away
+//    and no ring develops, so passing 1 whenever Uinf < 0 will report vortex
+//    ring behaviour throughout ordinary descending forward flight, where there
+//    is none. A caller with the full velocity vector should fade the strength
+//    out as the edgewise component grows, for example
+//        vrs_strength = 1 - smoothstep(|V_edge| / v_h, 0.8, 1.4)
+//    with v_h = sqrt(T / (2 rho A)) from the previous solve.
+//  - vortex ring state is also a whole-disk and whole-aircraft phenomenon:
+//    rotors on a multirotor enter it at different times, and that asymmetry is
+//    outside what a single axial rotor solve can express
+RotorPerformance* qprop_vrs(Rotor* rotor, double Uinf, double Omega, double vrs_strength, double tol, int itmax, double rho, double mu, double a);
 
 //PROP_STATE_NEW attaches a warm-start state to a rotor, enabling warm starting
 //Input:
